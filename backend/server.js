@@ -379,7 +379,6 @@ fastify.get('/api-keys/status', async (request, reply) => {
 
 const start = async () => {
   try {
-    // Set Vercel-compatible request timeout
     fastify.server.timeout = VERCEL_MAX_DURATION * 1000;
     await fastify.listen({ port: process.env.PORT || 3000, host: '0.0.0.0' });
     fastify.log.info(`Vercel-Optimized API Pipeline running on port ${fastify.server.address().port}`);
@@ -390,7 +389,13 @@ const start = async () => {
   }
 };
 
-// Export for Vercel serverless
-module.exports = fastify;
+// If running locally, start the server
+if (require.main === module) {
+  start();
+}
 
-start();
+// Export for Vercel Serverless Functions
+module.exports = async (req, res) => {
+  await fastify.ready();
+  fastify.server.emit('request', req, res);
+};
