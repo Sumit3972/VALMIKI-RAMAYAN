@@ -8,13 +8,13 @@ fastify.register(require('@fastify/cors'), {
   allowedHeaders: ['Content-Type', 'Authorization']
 });
 
-const db = require('./src/db');
-const { generateTTSChunk, chunkTextSafely } = require('./src/sarvam');
-const { generateTranslationPrep } = require('./src/gemini');
-const { uploadAudioToR2 } = require('./src/r2');
-const { runConcurrent } = require('./src/taskQueue');
-const { getKeyStats: getSarvamKeyStats } = require('./src/keyManager');
-const { getKeyStats: getGeminiKeyStats } = require('./src/geminiKeyManager');
+const db = require('../src/db');
+const { generateTTSChunk, chunkTextSafely } = require('../src/sarvam');
+const { generateTranslationPrep } = require('../src/gemini');
+const { uploadAudioToR2 } = require('../src/r2');
+const { runConcurrent } = require('../src/taskQueue');
+const { getKeyStats: getSarvamKeyStats } = require('../src/keyManager');
+const { getKeyStats: getGeminiKeyStats } = require('../src/geminiKeyManager');
 
 // Vercel free tier: max 60s execution time
 const VERCEL_MAX_DURATION = 60;

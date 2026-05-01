@@ -1,10 +1,10 @@
 {
   "name": "ramayana-api",
   "version": "1.0.0",
-  "main": "server.js",
+  "main": "api/server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
+    "start": "node api/server.js",
+    "dev": "node api/server.js",
     "migrate": "node scripts/migrate.js && node scripts/migrate_api_keys.js",
     "seed": "node scripts/seed_keys.js",
     "upload": "node scripts/upload.js"
