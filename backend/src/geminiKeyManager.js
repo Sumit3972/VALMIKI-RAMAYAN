@@ -2,8 +2,8 @@
  * Gemini API Key Pool Manager
  * 
  * Manages a DB-backed pool of Gemini API keys with in-memory caching.
- * When a key is exhausted (429 Resource Exhausted), it's marked expired permanently
- * and the next active key is selected automatically.
+ * When a key is exhausted (429 Resource Exhausted), it's pushed to the back of the queue
+ * (round-robin) so it can be retried later when its rate limit resets.
  */
 const db = require('./db');
 
@@ -37,20 +37,21 @@ async function getActiveKey() {
 }
 
 /**
- * Marks an API key as permanently expired in the DB.
+ * Rotates the API key by updating its last_used_at timestamp.
+ * This pushes it to the back of the queue for the round-robin loop.
  * Clears in-memory cache so next getActiveKey() picks a new key.
  * 
- * @param {string} apiKey - The key to mark as expired
+ * @param {string} apiKey - The key that hit a rate limit
  */
-async function markExpired(apiKey) {
+async function rotateKey(apiKey) {
   await db.query(
     `UPDATE gemini_api_keys 
-     SET status = 'expired', expired_at = NOW() 
-     WHERE api_key = $1 AND status = 'active'`,
+     SET last_used_at = NOW() 
+     WHERE api_key = $1`,
     [apiKey]
   );
 
-  console.log(`[GeminiKeyManager] ❌ Key EXPIRED (Rate Limit/Quota): ${maskKey(apiKey)}`);
+  console.log(`[GeminiKeyManager] 🔄 Key Rate Limited (429). Pushed to back of queue: ${maskKey(apiKey)}`);
 
   // Clear cache so next call picks a fresh key from DB
   cachedKey = null;
@@ -96,4 +97,4 @@ function maskKey(key) {
   return `${key.slice(0, 12)}...${key.slice(-4)}`;
 }
 
-module.exports = { getActiveKey, markExpired, recordUsage, getKeyStats };
+module.exports = { getActiveKey, rotateKey, recordUsage, getKeyStats };

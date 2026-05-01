@@ -2,7 +2,7 @@ const axios = require('axios');
 const Bottleneck = require('bottleneck');
 require('dotenv').config();
 
-const { getActiveKey, markExpired, recordUsage } = require('./geminiKeyManager');
+const { getActiveKey, rotateKey, recordUsage } = require('./geminiKeyManager');
 
 // Max retries = number of keys we could rotate through
 const MAX_KEY_RETRIES = 6;
@@ -48,8 +48,8 @@ async function callGeminiWithRetry(requestFn) {
 
     } catch (error) {
       if (isQuotaExhausted(error)) {
-        console.warn(`[Gemini] 🔄 Key quota exhausted (attempt ${attempt + 1}/${MAX_KEY_RETRIES}). Rotating...`);
-        await markExpired(apiKey);
+        console.warn(`[Gemini] 🔄 Key quota exhausted (attempt ${attempt + 1}/${MAX_KEY_RETRIES}). Rotating to next key...`);
+        await rotateKey(apiKey);
         lastError = error;
         // Loop continues
       } else {
@@ -58,7 +58,7 @@ async function callGeminiWithRetry(requestFn) {
     }
   }
 
-  const err = new Error('ALL_KEYS_EXHAUSTED: All Gemini API keys have been used up.');
+  const err = new Error('ALL_KEYS_EXHAUSTED: All Gemini API keys are currently rate limited. Please try again in a minute.');
   err.statusCode = 503;
   err.originalError = lastError;
   throw err;
