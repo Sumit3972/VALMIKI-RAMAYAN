@@ -155,8 +155,8 @@ ${sanskritText}`;
           parts: [{ text: userPrompt }]
         }],
         generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 1024,
+          temperature: 0.7,
+          maxOutputTokens: 10024,
         }
       };
 
