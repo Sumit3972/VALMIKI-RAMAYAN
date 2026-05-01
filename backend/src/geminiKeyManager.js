@@ -37,6 +37,24 @@ async function getActiveKey() {
 }
 
 /**
+ * Marks an API key as permanently expired in the DB.
+ * Clears in-memory cache so next getActiveKey() picks a new key.
+ * 
+ * @param {string} apiKey - The key to mark as expired
+ */
+async function markExpired(apiKey) {
+  await db.query(
+    `UPDATE gemini_api_keys 
+     SET status = 'expired', expired_at = NOW() 
+     WHERE api_key = $1 AND status = 'active'`,
+    [apiKey]
+  );
+
+  console.log(`[GeminiKeyManager] ❌ Key EXPIRED (Permanently Invalid/Leaked): ${maskKey(apiKey)}`);
+  cachedKey = null;
+}
+
+/**
  * Rotates the API key by updating its last_used_at timestamp.
  * This pushes it to the back of the queue for the round-robin loop.
  * Clears in-memory cache so next getActiveKey() picks a new key.
@@ -97,4 +115,4 @@ function maskKey(key) {
   return `${key.slice(0, 12)}...${key.slice(-4)}`;
 }
 
-module.exports = { getActiveKey, rotateKey, recordUsage, getKeyStats };
+module.exports = { getActiveKey, rotateKey, markExpired, recordUsage, getKeyStats };

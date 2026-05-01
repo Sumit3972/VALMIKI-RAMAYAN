@@ -2,7 +2,7 @@ const axios = require('axios');
 const Bottleneck = require('bottleneck');
 require('dotenv').config();
 
-const { getActiveKey, rotateKey, recordUsage } = require('./geminiKeyManager');
+const { getActiveKey, rotateKey, markExpired, recordUsage } = require('./geminiKeyManager');
 
 // Max retries = number of keys we could rotate through
 const MAX_KEY_RETRIES = 6;
@@ -15,11 +15,19 @@ const limiter = new Bottleneck({
 });
 
 /**
- * Detects if an Axios error is a quota/rate-limit exhaustion (429).
+ * Detects if an Axios error is a temporary rate limit (429).
  */
-function isQuotaExhausted(error) {
+function isRateLimited(error) {
   if (!error.response) return false;
-  return error.response.status === 429 || error.response.status === 403; // Sometimes quotas manifest as 403
+  return error.response.status === 429;
+}
+
+/**
+ * Detects if an Axios error is a permanent authentication/leak error (400, 403).
+ */
+function isInvalidKey(error) {
+  if (!error.response) return false;
+  return error.response.status === 403 || error.response.status === 400;
 }
 
 /**
@@ -47,9 +55,14 @@ async function callGeminiWithRetry(requestFn) {
       return result;
 
     } catch (error) {
-      if (isQuotaExhausted(error)) {
+      if (isRateLimited(error)) {
         console.warn(`[Gemini] 🔄 Key quota exhausted (attempt ${attempt + 1}/${MAX_KEY_RETRIES}). Rotating to next key...`);
         await rotateKey(apiKey);
+        lastError = error;
+        // Loop continues
+      } else if (isInvalidKey(error)) {
+        console.error(`[Gemini] 🚨 Key is INVALID or LEAKED (attempt ${attempt + 1}/${MAX_KEY_RETRIES}). Permanently expiring...`);
+        await markExpired(apiKey);
         lastError = error;
         // Loop continues
       } else {
