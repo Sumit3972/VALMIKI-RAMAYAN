@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
+
+# Data files containing sensitive or large info
+valmiki_ramayana_dataset.json
+scripts/file.txt
+*.sqlite
+*.db
+
+# macOS
+.DS_Store

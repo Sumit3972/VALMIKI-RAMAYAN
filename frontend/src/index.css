@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0C0A09;
+  --color-surface: #1C1917;
+  --color-surface-highlight: #292524;
+  --color-surface-elevated: #44403C;
+  --color-primary: #F59E0B;
+  --color-primary-hover: #FBBF24;
+  --color-primary-dim: #92400E;
+  --color-accent: #EF4444;
+  --color-text-main: #FAFAF9;
+  --color-text-secondary: #D6D3D1;
+  --color-text-muted: #78716C;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-active: rgba(245, 158, 11, 0.3);
+  
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Merriweather", ui-serif, "Georgia", serif;
+  --font-sanskrit: "Yatra One", "Tiro Devanagari Hindi", "Noto Sans Devanagari", serif;
+}
+
+/* Global scrollbar — thin & subtle */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 11, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.3);
+}
+
+/* Main content area scrollbar — always visible, right edge */
+.content-scroll {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.content-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.content-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+}
+.content-scroll::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 11, 0.25);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.content-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 11, 0.45);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+/* Firefox */
+.content-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(245, 158, 11, 0.25) rgba(255, 255, 255, 0.02);
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-text-main);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+  
+  /* Custom select styling */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 28px !important;
+    cursor: pointer;
+  }
+  
+  select option {
+    background-color: #1C1917;
+    color: #FAFAF9;
+    padding: 8px 12px;
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    background: linear-gradient(135deg, rgba(28, 25, 23, 0.8) 0%, rgba(28, 25, 23, 0.5) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 
+      0 4px 6px -1px rgba(0, 0, 0, 0.3),
+      0 20px 40px -10px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+  
+  .text-glow {
+    text-shadow: 0 0 30px rgba(245, 158, 11, 0.3), 0 0 60px rgba(245, 158, 11, 0.1);
+  }
+
+  .text-glow-subtle {
+    text-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
+  }
+  
+  .bg-gradient-sacred {
+    background: 
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(245, 158, 11, 0.08) 0%, transparent 60%),
+      radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.03) 0%, transparent 40%),
+      radial-gradient(circle at 0% 50%, rgba(239, 68, 68, 0.02) 0%, transparent 40%);
+    background-attachment: fixed;
+  }
+
+  .btn-pill {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .btn-pill:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+  }
+  .btn-pill:active {
+    transform: translateY(0);
+  }
+
+  /* Animated border gradient */
+  .border-glow {
+    position: relative;
+  }
+  .border-glow::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), transparent 40%, transparent 60%, rgba(245, 158, 11, 0.1));
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+  }
+
+  /* Pulse animation for playing state */
+  @keyframes audio-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+  }
+  .audio-playing {
+    animation: audio-pulse 2s ease-in-out infinite;
+  }
+}
