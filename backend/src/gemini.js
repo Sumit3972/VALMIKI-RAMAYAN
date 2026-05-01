@@ -156,7 +156,7 @@ ${sanskritText}`;
         }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 10024,
+          maxOutputTokens: 6004,
         }
       };
 
