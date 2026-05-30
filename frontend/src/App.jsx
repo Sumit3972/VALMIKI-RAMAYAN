@@ -424,9 +424,6 @@ function App() {
         if (audioRef.current) audioRef.current.pause();
         setPlayingAudioId(null);
         setAudioErrorId(null);
-        
-        // Save base sarga location to local storage
-        saveLocationToLocalStorage(kanda, sarga);
       } catch (err) {
         console.error('Failed to load shlokas', err);
       } finally {
@@ -434,12 +431,13 @@ function App() {
       }
     };
     if (kanda && sarga) loadShlokas();
-  }, [kanda, sarga, saveLocationToLocalStorage]);
+  }, [kanda, sarga]);
 
   // Scroll and highlight resumed shloka card
   useEffect(() => {
     if (shlokas.length > 0 && shouldScrollToShloka) {
-      const timer = setTimeout(() => {
+      let attempts = 0;
+      const tryScroll = () => {
         const element = document.getElementById(`shloka-card-${shouldScrollToShloka}`);
         if (element) {
           element.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -447,10 +445,15 @@ function App() {
           setTimeout(() => {
             element.classList.remove('resume-highlight');
           }, 3000);
+          setShouldScrollToShloka(null);
+        } else if (attempts < 15) {
+          attempts++;
+          setTimeout(tryScroll, 100); // Retry every 100ms
+        } else {
+          setShouldScrollToShloka(null); // Give up
         }
-        setShouldScrollToShloka(null);
-      }, 500);
-      return () => clearTimeout(timer);
+      };
+      setTimeout(tryScroll, 100);
     }
   }, [shlokas, shouldScrollToShloka]);
 
@@ -600,7 +603,11 @@ function App() {
                     const newKanda = Number(e.target.value);
                     setKanda(newKanda);
                     const meta = metadata.find(m => m.kanda === newKanda);
-                    if (meta && meta.sargas.length > 0) setSarga(meta.sargas[0]);
+                    if (meta && meta.sargas.length > 0) {
+                      const newSarga = meta.sargas[0];
+                      setSarga(newSarga);
+                      saveLocationToLocalStorage(newKanda, newSarga);
+                    }
                   }}
                 >
                   {metadata.map(m => (
@@ -618,7 +625,11 @@ function App() {
                   id="sarga-select"
                   className="bg-surfaceHighlight border border-white/10 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all min-w-[70px] sm:min-w-[90px]"
                   value={sarga} 
-                  onChange={e => setSarga(Number(e.target.value))}
+                  onChange={e => {
+                    const newSarga = Number(e.target.value);
+                    setSarga(newSarga);
+                    saveLocationToLocalStorage(kanda, newSarga);
+                  }}
                 >
                   {availableSargas.map(s => (
                     <option key={s} value={s}>Sarga {s}</option>
@@ -733,7 +744,10 @@ function App() {
                   Resume
                 </button>
                 <button
-                  onClick={() => setResumeState(null)}
+                  onClick={() => {
+                    localStorage.removeItem('valmiki_ramayan_resume');
+                    setResumeState(null);
+                  }}
                   className="p-1.5 rounded-lg hover:bg-white/5 text-textMuted hover:text-textSecondary transition-colors"
                 >
                   <ChevronDown className="w-4 h-4 rotate-90" />
