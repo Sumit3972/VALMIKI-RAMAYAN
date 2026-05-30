@@ -156,4 +156,13 @@
   .audio-playing {
     animation: audio-pulse 2s ease-in-out infinite;
   }
+
+  /* Resume Highlight Animation */
+  @keyframes border-flash {
+    0%, 100% { border-color: rgba(255, 255, 255, 0.06); box-shadow: none; }
+    50% { border-color: rgba(245, 158, 11, 0.8); box-shadow: 0 0 25px rgba(245, 158, 11, 0.4); }
+  }
+  .resume-highlight {
+    animation: border-flash 1.5s ease-in-out 2;
+  }
 }

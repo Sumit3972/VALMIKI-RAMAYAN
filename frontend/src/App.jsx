@@ -35,7 +35,8 @@ function ShlokaCard({
   isAudioLoading, 
   onPlayAudio, 
   onStopAudio,
-  currentAudioType 
+  currentAudioType,
+  onActiveShloka
 }) {
   const [showTranslation, setShowTranslation] = useState(false);
   const [targetLang, setTargetLang] = useState('en');
@@ -43,6 +44,14 @@ function ShlokaCard({
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationError, setTranslationError] = useState(null);
   const [audioType, setAudioType] = useState('sanskrit');
+
+  const handleToggleTranslation = () => {
+    const nextShow = !showTranslation;
+    setShowTranslation(nextShow);
+    if (nextShow && onActiveShloka) {
+      onActiveShloka(shloka.id, shloka.shloka_number);
+    }
+  };
 
   // Parse structured response from backend
   function parseTranslation(raw) {
@@ -151,6 +160,7 @@ function ShlokaCard({
 
   return (
     <motion.div 
+      id={`shloka-card-${shloka.id}`}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.04, duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -235,7 +245,7 @@ function ShlokaCard({
         {/* Translation Toggle */}
         <div className="border-t border-border pt-3">
           <button 
-            onClick={() => setShowTranslation(!showTranslation)}
+            onClick={handleToggleTranslation}
             className="flex items-center gap-2 text-textMuted hover:text-primary transition-colors duration-200 text-xs font-medium group/btn"
           >
             <Languages className="w-3.5 h-3.5 group-hover/btn:text-primary transition-colors" />
@@ -350,6 +360,38 @@ function App() {
   // Tracks in-flight audio prefetch keys to prevent duplicate concurrent requests
   const audioPrefetchInFlight = useRef(new Set());
 
+  // Resume states
+  const [resumeState, setResumeState] = useState(null);
+  const [shouldScrollToShloka, setShouldScrollToShloka] = useState(null);
+
+  // Load saved location on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('valmiki_ramayan_resume');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.kanda && parsed.sarga) {
+          setResumeState(parsed);
+        }
+      } catch (e) {
+        console.error('Failed to parse resume state', e);
+      }
+    }
+  }, []);
+
+  // Sync / Hide banner when user manually navigates to the saved place
+  useEffect(() => {
+    if (resumeState && resumeState.kanda === kanda && resumeState.sarga === sarga) {
+      setResumeState(null);
+    }
+  }, [kanda, sarga, resumeState]);
+
+  // Save current location helper
+  const saveLocationToLocalStorage = useCallback((kNum, sNum, shlokaId = null, shlokaNum = null) => {
+    const state = { kanda: kNum, sarga: sNum, shlokaId, shlokaNumber: shlokaNum };
+    localStorage.setItem('valmiki_ramayan_resume', JSON.stringify(state));
+  }, []);
+
   // Fetch Metadata
   useEffect(() => {
     const loadMeta = async () => {
@@ -382,6 +424,9 @@ function App() {
         if (audioRef.current) audioRef.current.pause();
         setPlayingAudioId(null);
         setAudioErrorId(null);
+        
+        // Save base sarga location to local storage
+        saveLocationToLocalStorage(kanda, sarga);
       } catch (err) {
         console.error('Failed to load shlokas', err);
       } finally {
@@ -389,7 +434,25 @@ function App() {
       }
     };
     if (kanda && sarga) loadShlokas();
-  }, [kanda, sarga]);
+  }, [kanda, sarga, saveLocationToLocalStorage]);
+
+  // Scroll and highlight resumed shloka card
+  useEffect(() => {
+    if (shlokas.length > 0 && shouldScrollToShloka) {
+      const timer = setTimeout(() => {
+        const element = document.getElementById(`shloka-card-${shouldScrollToShloka}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          element.classList.add('resume-highlight');
+          setTimeout(() => {
+            element.classList.remove('resume-highlight');
+          }, 3000);
+        }
+        setShouldScrollToShloka(null);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [shlokas, shouldScrollToShloka]);
 
   // Audio Prefetcher for the next 3 shlokas
   const prefetchNextAudio = useCallback((currentIndex, type) => {
@@ -454,6 +517,9 @@ function App() {
         if (currentIndex !== -1) {
           prefetchNextAudio(currentIndex, type);
         }
+        
+        // Save current location along with the active shloka
+        saveLocationToLocalStorage(kanda, sarga, shlokaId, currentShloka?.shloka_number);
       } else {
         setPlayingAudioId(null);
         setAudioErrorId(shlokaId);
@@ -621,6 +687,7 @@ function App() {
                 currentAudioType={currentAudioType}
                 onPlayAudio={handlePlayAudio}
                 onStopAudio={handleStopAudio}
+                onActiveShloka={(id, num) => saveLocationToLocalStorage(kanda, sarga, id, num)}
               />
             ))}
           </div>
@@ -628,6 +695,54 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* ── Beautiful Resume Floating Banner ── */}
+      <AnimatePresence>
+        {resumeState && (
+          <motion.div 
+            initial={{ opacity: 0, y: 100 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 100 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md"
+          >
+            <div className="glass-panel rounded-2xl p-4 flex items-center justify-between gap-4 border border-primary/30 shadow-2xl shadow-primary/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center flex-shrink-0 animate-pulse">
+                  <Headphones className="text-primary w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] text-primary uppercase tracking-widest font-semibold">Resume Journey</p>
+                  <p className="text-xs text-textSecondary font-medium mt-0.5">
+                    Continue {getKandaLabel(resumeState.kanda)} — Sarga {resumeState.sarga}
+                    {resumeState.shlokaNumber ? ` (Shloka ${resumeState.shlokaNumber.split('.').pop()})` : ''}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setKanda(resumeState.kanda);
+                    setSarga(resumeState.sarga);
+                    if (resumeState.shlokaId) {
+                      setShouldScrollToShloka(resumeState.shlokaId);
+                    }
+                    setResumeState(null);
+                  }}
+                  className="px-3.5 py-1.5 bg-primary text-background rounded-lg text-xs font-bold shadow-lg shadow-primary/20 hover:bg-primary-hover transition-all btn-pill"
+                >
+                  Resume
+                </button>
+                <button
+                  onClick={() => setResumeState(null)}
+                  className="p-1.5 rounded-lg hover:bg-white/5 text-textMuted hover:text-textSecondary transition-colors"
+                >
+                  <ChevronDown className="w-4 h-4 rotate-90" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
