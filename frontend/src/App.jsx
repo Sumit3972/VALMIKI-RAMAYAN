@@ -745,7 +745,6 @@ function App() {
                 </button>
                 <button
                   onClick={() => {
-                    localStorage.removeItem('valmiki_ramayan_resume');
                     setResumeState(null);
                   }}
                   className="p-1.5 rounded-lg hover:bg-white/5 text-textMuted hover:text-textSecondary transition-colors"
