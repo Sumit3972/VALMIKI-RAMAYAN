@@ -39,6 +39,19 @@ async function getOrGenerateTranslation(shloka, lang) {
   }
 }
 
+// Helper to extract only the translation part from the structured Gemini string for TTS
+function extractTranslationText(raw) {
+  if (!raw) return '';
+  const translationMatch = raw.match(/\|\|\|TRANSLATION\|\|\|([\s\S]*?)(?=\|\|\|CONTEXT\|\|\||\|\|\|INSIGHT\|\|\||$)/);
+  let text = translationMatch ? translationMatch[1].trim() : raw.trim();
+  // Strip any lingering header words at the very beginning of the translation
+  text = text
+    .replace(/^(translation|context|insight|अनुवाद|संदर्भ|विशेष दृष्टि)\s*[:：-]*\s*/i, '')
+    .replace(/^(1\.\s*translation|2\.\s*context|3\.\s*insight)\s*[:：-]*\s*/i, '')
+    .trim();
+  return text;
+}
+
 // Helper to safely parse JSON arrays from the DB text columns
 function parseUrls(urlStr) {
   if (!urlStr) return [];
@@ -238,7 +251,8 @@ fastify.post('/batch/audio', async (request, reply) => {
       textToProcess = shloka.sanskrit;
       langCode = 'hi-IN';
     } else {
-      textToProcess = await getOrGenerateTranslation(shloka, type);
+      const rawText = await getOrGenerateTranslation(shloka, type);
+      textToProcess = extractTranslationText(rawText);
       langCode = type === 'hi' ? 'hi-IN' : 'en-IN';
     }
 
@@ -312,7 +326,8 @@ fastify.post('/audio', async (request, reply) => {
       langCode = 'hi-IN'; // Sanskrit uses Devanagari; hi-IN is the closest supported TTS language
     } else {
       // Ensure the TTS-prepped translation exists
-      textToProcess = await getOrGenerateTranslation(shloka, type);
+      const rawText = await getOrGenerateTranslation(shloka, type);
+      textToProcess = extractTranslationText(rawText);
       langCode = type === 'hi' ? 'hi-IN' : 'en-IN';
     }
 

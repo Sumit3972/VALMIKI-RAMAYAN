@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { fetchShlokas, fetchTranslation, fetchAudioUrls, fetchMetadata } from './api';
 import { Volume2, Play, Pause, BookOpen, Loader2, ChevronDown, ChevronUp, Scroll, Languages, Headphones } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -28,6 +28,9 @@ function getKandaHindi(kandaNum) {
 function ShlokaCard({ 
   shloka, 
   index,
+  allShlokas,
+  translationCache,
+  prefetchInFlight,
   playingAudioId, 
   isAudioLoading, 
   onPlayAudio, 
@@ -36,33 +39,104 @@ function ShlokaCard({
 }) {
   const [showTranslation, setShowTranslation] = useState(false);
   const [targetLang, setTargetLang] = useState('en');
-  const [translationText, setTranslationText] = useState('');
+  const [translationData, setTranslationData] = useState({ translation: '', context: '', insight: '' });
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationError, setTranslationError] = useState(null);
   const [audioType, setAudioType] = useState('sanskrit');
 
+  // Parse structured response from backend
+  function parseTranslation(raw) {
+    if (!raw) return { translation: '', context: '', insight: '' };
+    const translationMatch = raw.match(/\|\|\|TRANSLATION\|\|\|([\s\S]*?)(?=\|\|\|CONTEXT\|\|\||\|\|\|INSIGHT\|\|\||$)/);
+    const contextMatch    = raw.match(/\|\|\|CONTEXT\|\|\|([\s\S]*?)(?=\|\|\|INSIGHT\|\|\||$)/);
+    const insightMatch    = raw.match(/\|\|\|INSIGHT\|\|\|([\s\S]*)$/);
+
+    const cleanText = (text) => {
+      if (!text) return '';
+      return text
+        .replace(/^(translation|context|insight|अनुवाद|संदर्भ|विशेष दृष्टि)\s*[:：-]*\s*/i, '')
+        .replace(/^(1\.\s*translation|2\.\s*context|3\.\s*insight)\s*[:：-]*\s*/i, '')
+        .trim();
+    };
+
+    return {
+      translation: cleanText(translationMatch ? translationMatch[1].trim() : raw.trim()),
+      context:     cleanText(contextMatch ? contextMatch[1].trim() : ''),
+      insight:     cleanText(insightMatch ? insightMatch[1].trim() : ''),
+    };
+  }
+
   const isPlaying = playingAudioId === shloka.id;
   const isLoadingAudio = isAudioLoading && playingAudioId === shloka.id;
+
+  // Cache key helper
+  const cacheKey = (id, lang) => `${id}_${lang}`;
+
+  // Background prefetch — always in the SAME language the user is viewing
+  // Uses prefetchInFlight Set to prevent duplicate concurrent requests
+  const prefetchNext = useCallback((currentIndex, lang) => {
+    const PREFETCH_COUNT = 3;
+    for (let offset = 1; offset <= PREFETCH_COUNT; offset++) {
+      const nextShloka = allShlokas?.[currentIndex + offset];
+      if (!nextShloka) break;
+
+      const key = `${nextShloka.id}_${lang}`;
+
+      // Skip if already cached
+      if (translationCache.current[key]) continue;
+      // Skip if a fetch is already in-flight for this exact key
+      if (prefetchInFlight.current.has(key)) continue;
+
+      // Mark as in-flight immediately to prevent duplicates
+      prefetchInFlight.current.add(key);
+
+      // Stagger requests: 800ms * offset to respect 15 RPM limit
+      setTimeout(async () => {
+        try {
+          const data = await fetchTranslation(nextShloka.id, lang);
+          translationCache.current[key] = parseTranslation(data.text);
+          console.log(`[Prefetch ✓] ${lang.toUpperCase()} shloka ${nextShloka.id}`);
+        } catch {
+          // Silent fail — prefetch is best-effort; key removed so it can retry later
+        } finally {
+          prefetchInFlight.current.delete(key);
+        }
+      }, offset * 800);
+    }
+  }, [allShlokas, translationCache, prefetchInFlight]);
 
   useEffect(() => {
     const loadTranslation = async () => {
       if (!showTranslation) return;
-      
+
+      const key = cacheKey(shloka.id, targetLang);
+
+      // ── Cache hit: instant load ──────────────────────────────
+      if (translationCache.current[key]) {
+        setTranslationData(translationCache.current[key]);
+        prefetchNext(index, targetLang);
+        return;
+      }
+
+      // ── Cache miss: fetch from API ───────────────────────────
       setIsTranslating(true);
-      setTranslationText('');
+      setTranslationData({ translation: '', context: '', insight: '' });
       setTranslationError(null);
       try {
         const data = await fetchTranslation(shloka.id, targetLang);
-        setTranslationText(data.text);
+        const parsed = parseTranslation(data.text);
+        translationCache.current[key] = parsed;  // store in shared cache
+        setTranslationData(parsed);
+        prefetchNext(index, targetLang);          // prefetch next 3
       } catch (err) {
-        console.error("Translation failed", err);
-        setTranslationError("Translation failed. Please try again later.");
+        console.error('Translation failed', err);
+        setTranslationError('Translation failed. Please try again later.');
       } finally {
         setIsTranslating(false);
       }
     };
     loadTranslation();
-  }, [shloka.id, targetLang, showTranslation, shloka.english]);
+  }, [shloka.id, targetLang, showTranslation]);
 
   const handleTogglePlay = () => {
     if (isPlaying) {
@@ -202,25 +276,44 @@ function ShlokaCard({
                   ))}
                 </div>
 
-                <div className="min-h-[40px] flex items-center">
+                <div className="min-h-[40px]">
                   {isTranslating ? (
-                    <div className="flex items-center gap-2 text-primary/70">
+                    <div className="flex items-center gap-2 text-primary/70 py-2">
                       <Loader2 className="w-4 h-4 animate-spin" />
                       <span className="text-xs font-medium">Translating...</span>
                     </div>
                   ) : translationError ? (
-                    <p className="text-sm font-medium text-accent">
-                      {translationError}
-                    </p>
-                  ) : (
-                    <p className={`text-sm sm:text-base leading-relaxed ${
-                      targetLang === 'hi' 
-                        ? 'font-sanskrit text-textMain' 
-                        : 'font-serif text-textSecondary'
-                    }`}>
-                      {translationText}
-                    </p>
-                  )}
+                    <p className="text-sm font-medium text-accent">{translationError}</p>
+                  ) : translationData.translation ? (
+                    <div className="space-y-3">
+                      {/* Translation */}
+                      <p className={`text-sm sm:text-base leading-relaxed ${
+                        targetLang === 'hi' ? 'font-sanskrit text-textMain' : 'font-serif text-textSecondary'
+                      }`}>
+                        {translationData.translation}
+                      </p>
+
+                      {/* Context */}
+                      {translationData.context && (
+                        <div className="border-t border-white/5 pt-3">
+                          <p className="text-[10px] uppercase tracking-widest text-textMuted font-semibold mb-1.5">Context</p>
+                          <p className="text-xs sm:text-sm leading-relaxed text-textMuted italic">
+                            {translationData.context}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Insight — only shown when present */}
+                      {translationData.insight && (
+                        <div className="mt-2 rounded-lg bg-primary/5 border border-primary/15 px-3 py-2.5">
+                          <p className="text-[10px] uppercase tracking-widest text-primary/70 font-semibold mb-1.5">✦ Insight</p>
+                          <p className="text-xs sm:text-sm leading-relaxed text-primary/80">
+                            {translationData.insight}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </motion.div>
@@ -247,6 +340,15 @@ function App() {
   const [audioUrls, setAudioUrls] = useState([]);
   const [currentAudioIndex, setCurrentAudioIndex] = useState(0);
   const audioRef = useRef(null);
+  // Shared translation cache: key = `${shlokaId}_${lang}`, value = parsed translation object
+  const translationCache = useRef({});
+  // Tracks in-flight prefetch keys to prevent duplicate concurrent requests
+  const prefetchInFlight = useRef(new Set());
+
+  // Shared audio cache: key = `${shlokaId}_${audioType}`, value = array of audio URLs
+  const audioCache = useRef({});
+  // Tracks in-flight audio prefetch keys to prevent duplicate concurrent requests
+  const audioPrefetchInFlight = useRef(new Set());
 
   // Fetch Metadata
   useEffect(() => {
@@ -272,17 +374,53 @@ function App() {
       try {
         const data = await fetchShlokas(kanda, sarga);
         setShlokas(data.shlokas || []);
+        // Clear translation & audio cache and in-flight trackers when sarga changes
+        translationCache.current = {};
+        prefetchInFlight.current.clear();
+        audioCache.current = {};
+        audioPrefetchInFlight.current.clear();
         if (audioRef.current) audioRef.current.pause();
         setPlayingAudioId(null);
         setAudioErrorId(null);
       } catch (err) {
-        console.error("Failed to load shlokas", err);
+        console.error('Failed to load shlokas', err);
       } finally {
         setIsLoading(false);
       }
     };
     if (kanda && sarga) loadShlokas();
   }, [kanda, sarga]);
+
+  // Audio Prefetcher for the next 3 shlokas
+  const prefetchNextAudio = useCallback((currentIndex, type) => {
+    const PREFETCH_COUNT = 3;
+    for (let offset = 1; offset <= PREFETCH_COUNT; offset++) {
+      const nextShloka = shlokas?.[currentIndex + offset];
+      if (!nextShloka) break;
+
+      const key = `${nextShloka.id}_${type}`;
+
+      if (audioCache.current[key]) continue;
+      if (audioPrefetchInFlight.current.has(key)) continue;
+
+      audioPrefetchInFlight.current.add(key);
+
+      // Stagger audio requests by 1000ms to avoid overwhelming TTS or Rate Limits
+      setTimeout(async () => {
+        try {
+          const data = await fetchAudioUrls(nextShloka.id, type);
+          if (data.urls && data.urls.length > 0) {
+            audioCache.current[key] = data.urls;
+            console.log(`[Audio Prefetch ✓] ${type.toUpperCase()} shloka ${nextShloka.id}`);
+          }
+        } catch {
+          // Silent fail for prefetch
+        } finally {
+          audioPrefetchInFlight.current.delete(key);
+        }
+      }, offset * 1000);
+    }
+  }, [shlokas]);
 
   // Audio Player Logic
   const handlePlayAudio = async (shlokaId, type) => {
@@ -292,13 +430,30 @@ function App() {
     setIsAudioLoading(true);
     setAudioUrls([]);
     setCurrentAudioIndex(0);
-
     setAudioErrorId(null);
 
+    const cacheKey = `${shlokaId}_${type}`;
+    const currentIndex = shlokas.findIndex(s => s.id === shlokaId);
+
+    // Cache hit
+    if (audioCache.current[cacheKey]) {
+      setAudioUrls(audioCache.current[cacheKey]);
+      setIsAudioLoading(false);
+      if (currentIndex !== -1) {
+        prefetchNextAudio(currentIndex, type);
+      }
+      return;
+    }
+
+    // Cache miss
     try {
       const data = await fetchAudioUrls(shlokaId, type);
       if (data.urls && data.urls.length > 0) {
+        audioCache.current[cacheKey] = data.urls;
         setAudioUrls(data.urls);
+        if (currentIndex !== -1) {
+          prefetchNextAudio(currentIndex, type);
+        }
       } else {
         setPlayingAudioId(null);
         setAudioErrorId(shlokaId);
@@ -331,8 +486,15 @@ function App() {
     if (currentAudioIndex < audioUrls.length - 1) {
       setCurrentAudioIndex(prev => prev + 1);
     } else {
-      setPlayingAudioId(null);
-      setCurrentAudioIndex(0);
+      // Current shloka audio finished: Auto play next shloka's audio if available
+      const currentIndex = shlokas.findIndex(s => s.id === playingAudioId);
+      if (currentIndex !== -1 && currentIndex < shlokas.length - 1) {
+        const nextShloka = shlokas[currentIndex + 1];
+        handlePlayAudio(nextShloka.id, currentAudioType);
+      } else {
+        setPlayingAudioId(null);
+        setCurrentAudioIndex(0);
+      }
     }
   };
 
@@ -451,6 +613,9 @@ function App() {
                 key={shloka.id} 
                 shloka={{...shloka, audioError: audioErrorId === shloka.id}}
                 index={i}
+                allShlokas={shlokas}
+                translationCache={translationCache}
+                prefetchInFlight={prefetchInFlight}
                 playingAudioId={playingAudioId}
                 isAudioLoading={isAudioLoading}
                 currentAudioType={currentAudioType}

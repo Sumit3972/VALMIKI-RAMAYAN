@@ -5,12 +5,12 @@ require('dotenv').config();
 const { getActiveKey, rotateKey, markExpired, recordUsage } = require('./geminiKeyManager');
 
 // Max retries = number of keys we could rotate through
-const MAX_KEY_RETRIES = 6;
+const MAX_KEY_RETRIES = 16;
 
-// Gemini Flash Free Tier allows 15 RPM.
-// We set minTime to 4100ms (approx 14.6 req/min) to stay just under the limit safely per key.
+// Gemini 2.5 Flash Free Tier allows 15 RPM.
+// We set minTime to 4200ms (approx 14.3 req/min) to stay safely under the limit per key.
 const limiter = new Bottleneck({
-  minTime: 4100,
+  minTime: 4200,
   maxConcurrent: 1
 });
 
@@ -84,69 +84,72 @@ async function callGeminiWithRetry(requestFn) {
 async function generateTranslationPrep(sanskritText, existingTranslation, targetLanguage) {
   return limiter.schedule(async () => {
     return callGeminiWithRetry(async (apiKey) => {
+
       const systemPrompt = targetLanguage === 'hi'
-        ? `आप वाल्मीकि रामायण के विशेषज्ञ संस्कृत-से-हिंदी अनुवादक हैं। यह एक पवित्र धार्मिक ग्रंथ है, इसलिए अनुवाद में श्रद्धा और गरिमा बनाए रखें।
+        ? `आप वाल्मीकि रामायण के विशेषज्ञ संस्कृत-से-हिंदी अनुवादक और टीकाकार हैं। यह एक पवित्र धार्मिक ग्रंथ है।
 
 अनुवाद के नियम:
-- "राम" को सदैव "श्री राम" लिखें। कभी अकेला "राम" न लिखें।
+- "राम" को सदैव "श्री राम" लिखें।
 - "सीता" को "माता सीता" या "सीता जी" लिखें।
 - "हनुमान" को "श्री हनुमान" या "हनुमान जी" लिखें।
 - "लक्ष्मण" को "लक्ष्मण जी" लिखें।
-- "रावण" जैसे खलनायकों के नाम यथावत रखें, उनमें जी या श्री न लगाएं।
-- ऋषि-मुनियों के लिए "महर्षि", "मुनि", या "ऋषि" जैसे सम्मानसूचक शब्दों का प्रयोग करें।
-- भाषा सरल, स्वाभाविक, और बोलचाल की हिंदी में हो जो सुनने में मधुर लगे।
-- श्लोक का अर्थ सटीक रखें, अनावश्यक शब्द न जोड़ें।
-- केवल अनुवाद लिखें। कोई टिप्पणी, व्याख्या, या परिचय न दें।
-- कोई बुलेट पॉइंट, तारांकन, या मार्कडाउन न लगाएं।`
-        : `You are an expert Sanskrit-to-English translator specializing in the Valmiki Ramayana, one of the holiest scriptures of Sanatan Dharma.
+- "रावण" जैसे खलनायकों के नाम यथावत रखें।
+- ऋषि-मुनियों के लिए "महर्षि", "मुनि", "ऋषि" आदि सम्मानसूचक शब्द प्रयोग करें।
+- भाषा सरल, स्वाभाविक और बोलचाल की हिंदी में हो।
 
-Translation Rules:
-- Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram". Never write just "Rama" or "Ram" alone.
+आउटपुट संरचना — इन तीन भागों में उत्तर दें:
+
+1. अनुवाद (2-3 वाक्य, श्लोक का सटीक व प्रवाहमान अनुवाद):
+|||TRANSLATION|||
+[यहाँ केवल अनुवाद का पाठ लिखें, कोई "अनुवाद:" शीर्षक या उपसर्ग न लगाएं]
+
+2. संदर्भ (2-4 वाक्य, श्लोक का प्रसंग, पात्र, घटना का संक्षिप्त परिचय):
+|||CONTEXT|||
+[यहाँ केवल प्रसंग/संदर्भ का पाठ लिखें, कोई "संदर्भ:" शीर्षक या उपसर्ग न लगाएं]
+
+3. विशेष दृष्टि (श्लोक से जुड़ी कोई गहरी आध्यात्मिक, दार्शनिक, नैतिक या व्यावहारिक जीवन से संबंधित प्रेरणादायक अंतर्दृष्टि अवश्य लिखें):
+|||INSIGHT|||
+[यहाँ केवल अंतर्दृष्टि का पाठ लिखें, कोई "विशेष दृष्टि:" शीर्षक या उपसर्ग न लगाएं]
+
+कोई बुलेट पॉइंट, तारांकन, मार्कडाउन या क्रमांक न लगाएं।`
+        : `You are an expert Sanskrit scholar and commentator specializing in the Valmiki Ramayana.
+
+Honorifics:
+- Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
 - Refer to "Sita" as "Mata Sita" or "Devi Sita".
-- Refer to "Hanuman" as "Shree Hanuman" or "Lord Hanuman".
+- Refer to "Hanuman" as "Shree Hanuman".
 - Refer to "Lakshmana" as "Shree Lakshman".
-- Antagonists like "Ravana" should be written as-is without honorifics.
-- Use respectful titles for sages: "Maharishi", "Sage", "Rishi" as appropriate.
-- Maintain a reverential, dignified tone befitting sacred scripture.
-- Produce natural, flowing English that sounds graceful when spoken aloud.
-- Preserve the meaning faithfully — do not add or omit content.
-- Output ONLY the translated text. No commentary, no notes, no introductions.
-- No bullet points, no markdown, no asterisks, no numbering.`;
+- Antagonists (e.g. Ravana) without honorifics.
+- Sages: use "Maharishi", "Sage", "Rishi".
+
+Output structure — respond in exactly these three sections:
+
+1. Translation (2–3 sentences, natural and reverent, faithful to the Sanskrit):
+|||TRANSLATION|||
+[Write only the translation text here, do not add any "Translation:" title or prefix]
+
+2. Context (2–4 sentences explaining who is speaking, what event is happening, and why this shloka matters in the narrative):
+|||CONTEXT|||
+[Write only the context text here, do not add any "Context:" title or prefix]
+
+3. Insight (Provide a notable philosophical, spiritual, ethical, or psychological insight or life lesson from this shloka):
+|||INSIGHT|||
+[Write only the insight text here, do not add any "Insight:" title or prefix]
+
+No bullet points, no markdown, no asterisks, no numbering.`;
 
       let userPrompt = '';
       if (targetLanguage === 'hi') {
-        if (existingTranslation && existingTranslation.trim() !== '') {
-          userPrompt = `इस संस्कृत श्लोक का हिंदी अनुवाद करें। संदर्भ अनुवाद को सटीकता के लिए देखें, लेकिन स्वाभाविक बोलचाल की हिंदी में लिखें।
-
-श्लोक:
-${sanskritText}
-
-संदर्भ अनुवाद:
-${existingTranslation}`;
-        } else {
-          userPrompt = `इस संस्कृत श्लोक का हिंदी अनुवाद करें। स्वाभाविक बोलचाल की हिंदी में लिखें।
-
-श्लोक:
-${sanskritText}`;
-        }
+        userPrompt = existingTranslation?.trim()
+          ? `इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}\n\nसंदर्भ अनुवाद (सटीकता के लिए देखें):\n${existingTranslation}`
+          : `इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}`;
       } else {
-        if (existingTranslation && existingTranslation.trim() !== '') {
-          userPrompt = `Translate this Sanskrit shloka into spoken English. Use the reference for accuracy but produce natural, reverent English.
-
-Shloka:
-${sanskritText}
-
-Reference:
-${existingTranslation}`;
-        } else {
-          userPrompt = `Translate this Sanskrit shloka into spoken English. Produce natural, reverent English.
-
-Shloka:
-${sanskritText}`;
-        }
+        userPrompt = existingTranslation?.trim()
+          ? `Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+          : `Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}`;
       }
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
       const payload = {
         systemInstruction: {
           parts: [{ text: systemPrompt }]
@@ -155,8 +158,8 @@ ${sanskritText}`;
           parts: [{ text: userPrompt }]
         }],
         generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 6004,
+          temperature: 0.65,
+          maxOutputTokens: 65536, // Max for Gemini 2.5 Flash
         }
       };
 
@@ -171,11 +174,11 @@ ${sanskritText}`;
       let content = response.data.candidates[0].content?.parts?.[0]?.text;
       
       if (!content) {
-        console.error("Gemini returned empty content. Response:", JSON.stringify(response.data));
+        console.error('Gemini returned empty content. Response:', JSON.stringify(response.data));
         throw new Error('Gemini returned empty content.');
       }
 
-      // Post-processing: clean up markdown artifacts for TTS
+      // Post-processing: clean up markdown artifacts but preserve our section delimiters
       content = content
         .replace(/^\s*[\*\-•]\s*/gm, '')
         .replace(/\*\*/g, '')
@@ -183,11 +186,10 @@ ${sanskritText}`;
         .replace(/`/g, '')
         .replace(/^#+\s*/gm, '')
         .replace(/\[.*?\]\(.*?\)/g, '')
-        .replace(/\n{2,}/g, ' ')
         .replace(/\s{2,}/g, ' ')
         .trim();
 
-      // Post-processing: enforce honorifics as a safety net
+      // Enforce honorifics on the full structured content
       content = applyHonorifics(content, targetLanguage);
 
       return content;
