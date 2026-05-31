@@ -507,6 +507,8 @@ function App() {
       setIsAudioLoading(false);
       if (currentIndex !== -1) {
         prefetchNextAudio(currentIndex, type);
+        const currentShloka = shlokas[currentIndex];
+        saveLocationToLocalStorage(kanda, sarga, shlokaId, currentShloka?.shloka_number);
       }
       return;
     }
@@ -519,10 +521,9 @@ function App() {
         setAudioUrls(data.urls);
         if (currentIndex !== -1) {
           prefetchNextAudio(currentIndex, type);
+          const currentShloka = shlokas[currentIndex];
+          saveLocationToLocalStorage(kanda, sarga, shlokaId, currentShloka?.shloka_number);
         }
-        
-        // Save current location along with the active shloka
-        saveLocationToLocalStorage(kanda, sarga, shlokaId, currentShloka?.shloka_number);
       } else {
         setPlayingAudioId(null);
         setAudioErrorId(shlokaId);
