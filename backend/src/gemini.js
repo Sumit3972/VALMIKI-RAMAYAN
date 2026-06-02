@@ -31,6 +31,21 @@ function isInvalidKey(error) {
 }
 
 /**
+ * Detects if an Axios error is due to model overload/unavailability (503).
+ */
+function isModelUnavailable(error) {
+  const response = error.response || error.originalError?.response;
+  if (!response) return false;
+
+  const is503 = response.status === 503;
+  const hasUnavailableMessage = 
+    response.data?.error?.message?.includes('experiencing high demand') || 
+    response.data?.error?.status === 'UNAVAILABLE';
+
+  return is503 || hasUnavailableMessage;
+}
+
+/**
  * Executes an API call with automatic key rotation on quota exhaustion.
  */
 async function callGeminiWithRetry(requestFn) {
@@ -83,10 +98,16 @@ async function callGeminiWithRetry(requestFn) {
  */
 async function generateTranslationPrep(sanskritText, existingTranslation, targetLanguage) {
   return limiter.schedule(async () => {
-    return callGeminiWithRetry(async (apiKey) => {
+    const models = ['gemini-3.5-flash', 'gemini-3.1-flash-lite'];
+    let lastError = null;
 
-      const systemPrompt = targetLanguage === 'hi'
-        ? `आप वाल्मीकि रामायण के विशेषज्ञ संस्कृत-से-हिंदी अनुवादक और टीकाकार हैं। यह एक पवित्र धार्मिक ग्रंथ है।
+    for (const model of models) {
+      try {
+        console.log(`[Gemini] Attempting translation using model: ${model}`);
+        const content = await callGeminiWithRetry(async (apiKey) => {
+
+          const systemPrompt = targetLanguage === 'hi'
+            ? `आप वाल्मीकि रामायण के विशेषज्ञ संस्कृत-से-हिंदी अनुवादक और टीकाकार हैं। यह एक पवित्र धार्मिक ग्रंथ है।
 
 अनुवाद के नियम:
 - "राम" को सदैव "श्री राम" लिखें।
@@ -112,7 +133,7 @@ async function generateTranslationPrep(sanskritText, existingTranslation, target
 [यहाँ केवल अंतर्दृष्टि का पाठ लिखें, कोई "विशेष दृष्टि:" शीर्षक या उपसर्ग न लगाएं]
 
 कोई बुलेट पॉइंट, तारांकन, मार्कडाउन या क्रमांक न लगाएं।`
-        : `You are an expert Sanskrit scholar and commentator specializing in the Valmiki Ramayana.
+            : `You are an expert Sanskrit scholar and commentator specializing in the Valmiki Ramayana.
 
 Honorifics:
 - Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
@@ -138,64 +159,78 @@ Output structure — respond in exactly these three sections:
 
 No bullet points, no markdown, no asterisks, no numbering.`;
 
-      let userPrompt = '';
-      if (targetLanguage === 'hi') {
-        userPrompt = existingTranslation?.trim()
-          ? `इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}\n\nसंदर्भ अनुवाद (सटीकता के लिए देखें):\n${existingTranslation}`
-          : `इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}`;
-      } else {
-        userPrompt = existingTranslation?.trim()
-          ? `Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
-          : `Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}`;
-      }
+          let userPrompt = '';
+          if (targetLanguage === 'hi') {
+            userPrompt = existingTranslation?.trim()
+              ? `इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}\n\nसंदर्भ अनुवाद (सटीकता के लिए देखें):\n${existingTranslation}`
+              : `इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}`;
+          } else {
+            userPrompt = existingTranslation?.trim()
+              ? `Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+              : `Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}`;
+          }
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
-      const payload = {
-        systemInstruction: {
-          parts: [{ text: systemPrompt }]
-        },
-        contents: [{
-          parts: [{ text: userPrompt }]
-        }],
-        generationConfig: {
-          temperature: 0.65,
-          maxOutputTokens: 65536, // Max for Gemini 2.5 Flash
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const payload = {
+            systemInstruction: {
+              parts: [{ text: systemPrompt }]
+            },
+            contents: [{
+              parts: [{ text: userPrompt }]
+            }],
+            generationConfig: {
+              temperature: 0.65,
+              maxOutputTokens: 65536,
+            }
+          };
+
+          const response = await axios.post(url, payload, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+
+          if (!response.data || !response.data.candidates || response.data.candidates.length === 0) {
+            throw new Error('Invalid response from Gemini API');
+          }
+
+          let content = response.data.candidates[0].content?.parts?.[0]?.text;
+          
+          if (!content) {
+            console.error('Gemini returned empty content. Response:', JSON.stringify(response.data));
+            throw new Error('Gemini returned empty content.');
+          }
+
+          // Post-processing: clean up markdown artifacts but preserve our section delimiters
+          content = content
+            .replace(/^\s*[\*\-•]\s*/gm, '')
+            .replace(/\*\*/g, '')
+            .replace(/\*/g, '')
+            .replace(/`/g, '')
+            .replace(/^#+\s*/gm, '')
+            .replace(/\[.*?\]\(.*?\)/g, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+
+          // Enforce honorifics on the full structured content
+          content = applyHonorifics(content, targetLanguage);
+
+          return content;
+        });
+
+        return content;
+      } catch (error) {
+        if (isModelUnavailable(error)) {
+          console.warn(`[Gemini] ⚠️ Model ${model} is experiencing high demand (503). Falling back to next model...`);
+          lastError = error;
+          continue;
         }
-      };
-
-      const response = await axios.post(url, payload, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      if (!response.data || !response.data.candidates || response.data.candidates.length === 0) {
-        throw new Error('Invalid response from Gemini API');
+        throw error;
       }
+    }
 
-      let content = response.data.candidates[0].content?.parts?.[0]?.text;
-      
-      if (!content) {
-        console.error('Gemini returned empty content. Response:', JSON.stringify(response.data));
-        throw new Error('Gemini returned empty content.');
-      }
-
-      // Post-processing: clean up markdown artifacts but preserve our section delimiters
-      content = content
-        .replace(/^\s*[\*\-•]\s*/gm, '')
-        .replace(/\*\*/g, '')
-        .replace(/\*/g, '')
-        .replace(/`/g, '')
-        .replace(/^#+\s*/gm, '')
-        .replace(/\[.*?\]\(.*?\)/g, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-
-      // Enforce honorifics on the full structured content
-      content = applyHonorifics(content, targetLanguage);
-
-      return content;
-    });
+    throw lastError || new Error('ALL_FALLBACK_MODELS_FAILED: All fallback models failed.');
   });
 }
+
 
 /**
  * Ensures proper honorifics are applied to sacred names.
