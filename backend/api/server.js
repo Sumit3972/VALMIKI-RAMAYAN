@@ -19,11 +19,11 @@ const { getKeyStats: getGeminiKeyStats } = require('../src/geminiKeyManager');
 
 // Global endpoint concurrency limiters to protect Hugging Face container from freezes
 const audioLimiter = new Bottleneck({
-  maxConcurrent: 2 // Max 2 parallel audio generations globally
+  maxConcurrent: 4 // Max 4 parallel audio generations globally
 });
 
 const translateLimiter = new Bottleneck({
-  maxConcurrent: 3 // Max 3 parallel translations globally
+  maxConcurrent: 5 // Max 5 parallel translations globally
 });
 
 // Vercel free tier: max 60s execution time
