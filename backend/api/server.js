@@ -1,5 +1,6 @@
 const fastify = require('fastify')({ logger: true });
 require('dotenv').config();
+const Bottleneck = require('bottleneck');
 
 // CORS — allow all origins
 fastify.register(require('@fastify/cors'), { 
@@ -15,6 +16,15 @@ const { uploadAudioToR2 } = require('../src/r2');
 const { runConcurrent } = require('../src/taskQueue');
 const { getKeyStats: getSarvamKeyStats } = require('../src/keyManager');
 const { getKeyStats: getGeminiKeyStats } = require('../src/geminiKeyManager');
+
+// Global endpoint concurrency limiters to protect Hugging Face container from freezes
+const audioLimiter = new Bottleneck({
+  maxConcurrent: 2 // Max 2 parallel audio generations globally
+});
+
+const translateLimiter = new Bottleneck({
+  maxConcurrent: 3 // Max 3 parallel translations globally
+});
 
 // Vercel free tier: max 60s execution time
 const VERCEL_MAX_DURATION = 60;
@@ -129,18 +139,21 @@ fastify.post('/translate', async (request, reply) => {
     return reply.status(400).send({ error: 'Invalid shloka_id or lang' });
   }
 
-  try {
-    const result = await db.query(`SELECT * FROM ramayana_shlokas WHERE id = $1`, [shloka_id]);
-    if (result.rows.length === 0) return reply.status(404).send({ error: 'Shloka not found' });
-    
-    const shloka = result.rows[0];
-    const newText = await getOrGenerateTranslation(shloka, lang);
-    
-    return { shloka_id, lang, text: newText };
-  } catch (err) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: 'Failed to translate', details: err.message });
-  }
+  // Queue translation to prevent database key conflicts during simultaneous rotations
+  return translateLimiter.schedule(async () => {
+    try {
+      const result = await db.query(`SELECT * FROM ramayana_shlokas WHERE id = $1`, [shloka_id]);
+      if (result.rows.length === 0) return reply.status(404).send({ error: 'Shloka not found' });
+      
+      const shloka = result.rows[0];
+      const newText = await getOrGenerateTranslation(shloka, lang);
+      
+      return { shloka_id, lang, text: newText };
+    } catch (err) {
+      fastify.log.error(err);
+      return reply.status(500).send({ error: 'Failed to translate', details: err.message });
+    }
+  });
 });
 
 // ---------------------------------------------------------
@@ -296,65 +309,68 @@ fastify.post('/audio', async (request, reply) => {
     return reply.status(400).send({ error: 'Invalid shloka_id or type (must be sanskrit, hi, en)' });
   }
 
-  try {
-    // 1. Fetch Shloka
-    const result = await db.query(`SELECT * FROM ramayana_shlokas WHERE id = $1`, [shloka_id]);
-    if (result.rows.length === 0) {
-      return reply.status(404).send({ error: 'Shloka not found' });
-    }
-    const shloka = result.rows[0];
+  // Bounded concurrency queue to protect container memory and event loop from freezes
+  return audioLimiter.schedule(async () => {
+    try {
+      // 1. Fetch Shloka
+      const result = await db.query(`SELECT * FROM ramayana_shlokas WHERE id = $1`, [shloka_id]);
+      if (result.rows.length === 0) {
+        return reply.status(404).send({ error: 'Shloka not found' });
+      }
+      const shloka = result.rows[0];
 
-    // 2. Check Cache
-    const columnMap = {
-      'sanskrit': 'audio_sanskrit_url',
-      'en': 'audio_english_url',
-      'hi': 'audio_hindi_url'
-    };
-    const columnName = columnMap[type];
-    
-    if (shloka[columnName]) {
-      // Already generated and chunked! Return the array.
-      return { type, urls: parseUrls(shloka[columnName]) };
-    }
-
-    // 3. Prepare Text
-    let textToProcess = '';
-    let langCode = '';
-
-    if (type === 'sanskrit') {
-      textToProcess = shloka.sanskrit;
-      langCode = 'hi-IN'; // Sanskrit uses Devanagari; hi-IN is the closest supported TTS language
-    } else {
-      // Ensure the TTS-prepped translation exists
-      const rawText = await getOrGenerateTranslation(shloka, type);
-      textToProcess = extractTranslationText(rawText);
-      langCode = type === 'hi' ? 'hi-IN' : 'en-IN';
-    }
-
-    // 4. Chunk Text
-    const chunks = chunkTextSafely(textToProcess, 2000);
-    const audioUrls = [];
-
-    // 5. Generate and Upload Chunks
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkText = chunks[i];
-      const audioBuffer = await generateTTSChunk(chunkText, langCode);
+      // 2. Check Cache
+      const columnMap = {
+        'sanskrit': 'audio_sanskrit_url',
+        'en': 'audio_english_url',
+        'hi': 'audio_hindi_url'
+      };
+      const columnName = columnMap[type];
       
-      const fileName = `k${shloka.kanda}_s${shloka.sarga}_sh${shloka.shloka_number}_${type}_pt${i+1}_${Date.now()}.mp3`;
-      const publicUrl = await uploadAudioToR2(audioBuffer, fileName);
-      audioUrls.push(publicUrl);
+      if (shloka[columnName]) {
+        // Already generated and chunked! Return the array.
+        return { type, urls: parseUrls(shloka[columnName]) };
+      }
+
+      // 3. Prepare Text
+      let textToProcess = '';
+      let langCode = '';
+
+      if (type === 'sanskrit') {
+        textToProcess = shloka.sanskrit;
+        langCode = 'hi-IN'; // Sanskrit uses Devanagari; hi-IN is the closest supported TTS language
+      } else {
+        // Ensure the TTS-prepped translation exists
+        const rawText = await getOrGenerateTranslation(shloka, type);
+        textToProcess = extractTranslationText(rawText);
+        langCode = type === 'hi' ? 'hi-IN' : 'en-IN';
+      }
+
+      // 4. Chunk Text
+      const chunks = chunkTextSafely(textToProcess, 2000);
+      const audioUrls = [];
+
+      // 5. Generate and Upload Chunks
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkText = chunks[i];
+        const audioBuffer = await generateTTSChunk(chunkText, langCode);
+        
+        const fileName = `k${shloka.kanda}_s${shloka.sarga}_sh${shloka.shloka_number}_${type}_pt${i+1}_${Date.now()}.mp3`;
+        const publicUrl = await uploadAudioToR2(audioBuffer, fileName);
+        audioUrls.push(publicUrl);
+      }
+
+      // 6. Cache the Array in DB
+      const stringifiedUrls = JSON.stringify(audioUrls);
+      await db.query(`UPDATE ramayana_shlokas SET ${columnName} = $1 WHERE id = $2`, [stringifiedUrls, shloka_id]);
+
+      return { type, urls: audioUrls };
+
+    } catch (err) {
+      fastify.log.error(err);
+      return reply.status(500).send({ error: 'Failed to generate audio', details: err.message });
     }
-
-    // 6. Cache the Array in DB
-    const stringifiedUrls = JSON.stringify(audioUrls);
-    await db.query(`UPDATE ramayana_shlokas SET ${columnName} = $1 WHERE id = $2`, [stringifiedUrls, shloka_id]);
-
-    return { type, urls: audioUrls };
-
-  } catch (err) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: 'Failed to generate audio', details: err.message });
-  }
+  });
 });
 
 // ---------------------------------------------------------
