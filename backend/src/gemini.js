@@ -98,7 +98,7 @@ async function callGeminiWithRetry(requestFn) {
  */
 async function generateTranslationPrep(sanskritText, existingTranslation, targetLanguage) {
   return limiter.schedule(async () => {
-    const models = ['gemini-3.5-flash', 'gemini-3.1-flash-lite'];
+    const models = ['gemini-3.1-flash-lite'];
     let lastError = null;
 
     for (const model of models) {
