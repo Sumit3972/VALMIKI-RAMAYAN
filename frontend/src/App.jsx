@@ -618,34 +618,57 @@ function App() {
 
       {/* ── Navbar ── */}
       <nav className="w-full bg-surface/90 backdrop-blur-xl z-50 border-b border-border flex-shrink-0">
-        <div className="max-w-4xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3">
-          <div className="flex items-center justify-between gap-3">
-            {/* Logo */}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center">
-                <BookOpen className="text-primary w-4 h-4 sm:w-[18px] sm:h-[18px]" />
+        <div className="max-w-4xl mx-auto px-3 sm:px-4 py-2 sm:py-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+            {/* Top row: Logo, Search trigger, Theme selector (mobile only) */}
+            <div className="flex items-center justify-between w-full sm:w-auto">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 flex items-center justify-center">
+                  <BookOpen className="text-primary w-4 h-4 sm:w-[18px] sm:h-[18px]" />
+                </div>
+                <div>
+                  <h1 className="text-sm sm:text-base font-serif font-bold text-glow leading-none">Valmiki Ramayana</h1>
+                  <p className="text-[9px] sm:text-[10px] text-textMuted mt-0.5 font-medium">वाल्मीकि रामायण</p>
+                </div>
               </div>
-              <div className="hidden sm:block">
-                <h1 className="text-sm sm:text-base font-serif font-bold text-glow leading-none">Valmiki Ramayana</h1>
-                <p className="text-[10px] text-textMuted mt-0.5 font-medium">वाल्मीकि रामायण</p>
+
+              {/* Mobile row right-side controls (Search & Theme) */}
+              <div className="flex items-center gap-2 sm:hidden">
+                <button 
+                  onClick={() => setSearchOpen(true)}
+                  className="p-1.5 bg-surfaceHighlight border border-white/10 rounded-lg text-textMuted hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center"
+                  title="Search Shlokas"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+
+                <select 
+                  id="theme-select-mobile"
+                  className="bg-surfaceHighlight border border-white/10 rounded-lg px-1.5 py-1 text-xs font-medium text-textMain outline-none min-w-[70px]"
+                  value={theme}
+                  onChange={e => setTheme(e.target.value)}
+                >
+                  <option value="saffron">Saffron</option>
+                  <option value="dandaka">Dandaka</option>
+                  <option value="setu">Setu</option>
+                </select>
               </div>
-              <h1 className="sm:hidden text-sm font-serif font-bold text-glow">Ramayana</h1>
             </div>
             
-            {/* Controls Row */}
-            <div className="flex items-center gap-2 sm:gap-3">
-              {/* Global Search trigger button */}
+            {/* Desktop controls or second-row selectors (Kanda & Sarga) on mobile */}
+            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
+              {/* Desktop Search */}
               <button 
                 onClick={() => setSearchOpen(true)}
-                className="p-1.5 sm:p-2 bg-surfaceHighlight border border-white/10 rounded-lg text-textMuted hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center"
+                className="hidden sm:flex p-2 bg-surfaceHighlight border border-white/10 rounded-lg text-textMuted hover:text-primary hover:border-primary/30 transition-all items-center justify-center"
                 title="Search Shlokas"
               >
                 <Search className="w-4 h-4" />
               </button>
 
-              {/* Theme selector */}
-              <div className="flex flex-col">
-                <label className="text-[9px] text-textMuted font-semibold uppercase tracking-[0.15em] mb-1 hidden sm:block">Theme</label>
+              {/* Desktop Theme */}
+              <div className="hidden sm:flex flex-col">
+                <label className="text-[9px] text-textMuted font-semibold uppercase tracking-[0.15em] mb-1">Theme</label>
                 <select 
                   id="theme-select"
                   className="bg-surfaceHighlight border border-white/10 rounded-lg px-2 sm:px-2.5 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all min-w-[70px] sm:min-w-[90px]"
@@ -659,11 +682,11 @@ function App() {
               </div>
 
               {/* Kanda selector */}
-              <div className="flex flex-col">
+              <div className="flex flex-col flex-1 sm:flex-initial">
                 <label className="text-[9px] text-textMuted font-semibold uppercase tracking-[0.15em] mb-1 hidden sm:block">Kanda</label>
                 <select 
                   id="kanda-select"
-                  className="bg-surfaceHighlight border border-white/10 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all min-w-[110px] sm:min-w-[150px]"
+                  className="bg-surfaceHighlight border border-white/10 rounded-lg px-2 py-1 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all w-full sm:min-w-[150px]"
                   value={kanda} 
                   onChange={e => {
                     const newKanda = Number(e.target.value);
@@ -685,11 +708,11 @@ function App() {
               </div>
 
               {/* Sarga selector */}
-              <div className="flex flex-col">
+              <div className="flex flex-col flex-shrink-0">
                 <label className="text-[9px] text-textMuted font-semibold uppercase tracking-[0.15em] mb-1 hidden sm:block">Sarga</label>
                 <select 
                   id="sarga-select"
-                  className="bg-surfaceHighlight border border-white/10 rounded-lg px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all min-w-[70px] sm:min-w-[90px]"
+                  className="bg-surfaceHighlight border border-white/10 rounded-lg px-2 py-1 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all min-w-[75px] sm:min-w-[90px]"
                   value={sarga} 
                   onChange={e => {
                     const newSarga = Number(e.target.value);
