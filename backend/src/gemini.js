@@ -263,36 +263,24 @@ async function classifySpeaker(sanskritText, englishTranslation) {
           const systemPrompt = `You are an expert scholar of the Valmiki Ramayana.
 Analyze the given Sanskrit shloka and its English translation, and identify the primary character speaking these words.
 
-Respond with ONLY one of these exact lowercase strings:
-- 'valmiki' (use for all narration, descriptions, or when the narrator Valmiki is speaking)
-- 'sri_ram' (Shree Ram / Rama)
-- 'sita' (Mata Sita / Sita)
-- 'lakshmana' (Shree Lakshman / Lakshmana)
-- 'hanuman' (Shree Hanuman)
-- 'ravana' (Ravana)
-- 'dasharatha' (King Dasharatha)
-- 'kaikeyi' (Kaikeyi)
-- 'kousalya' (Kausalya)
-- 'sumitra' (Sumitra)
-- 'bharata' (Bharat / Bharata)
-- 'shatrughna' (Shatrughna)
-- 'sugriva' (Sugriva)
-- 'vibhishana' (Vibhishana)
-- 'manthara' (Manthara)
-- 'surpanakha' (Surpanakha)
-- 'indrajit' (Indrajit / Meghanada)
-- 'kumbhakarna' (Kumbhakarna)
-- 'janaka' (King Janaka)
-- 'vishwamitra' (Sage Vishwamitra)
-- 'vashistha' (Sage Vashistha)
-- 'jatayu' (Jatayu / Sampati)
-- 'angada' (Angada)
-- 'maricha' (Maricha)
-- 'shabari' (Shabari)
-- 'guha' (Guha / Nishadraj)
-- 'other' (any other character not listed)
+Determine:
+1. The character's name in English (lowercase snake_case, e.g. 'sri_ram', 'sita', 'vali', 'mandodari', 'indra').
+2. The character's name in Hindi/Sanskrit (Devanagari script, e.g. 'श्री राम', 'सीता जी', 'बाली', 'मंदोदरी', 'इन्द्र').
+3. The character's gender ('male' or 'female').
 
-Do not include any punctuation, quotes, markdown, introduction, explanation, or additional text. Just the single string.`;
+If it is narration, scene description, or when the narrator Valmiki is speaking, use character 'valmiki', name in Hindi 'वाल्मीकि', and gender 'male'.
+
+Respond with ONLY the English name, Hindi name, and gender separated by colons, like:
+english_snake_case:hindi_name:gender
+
+Examples:
+- sri_ram:श्री राम:male
+- sita:सीता जी:female
+- vali:बाली:male
+- mandodari:मंदोदरी:female
+- valmiki:वाल्मीकि:male
+
+Do not include any other text, quotes, punctuation, or markdown. Just this single string.`;
 
           const userPrompt = `Shloka:
 ${sanskritText}
@@ -310,7 +298,7 @@ ${englishTranslation}`;
             }],
             generationConfig: {
               temperature: 0.1,
-              maxOutputTokens: 10,
+              maxOutputTokens: 30,
             }
           };
 
@@ -327,19 +315,18 @@ ${englishTranslation}`;
             throw new Error('Empty content from Gemini API during classification');
           }
 
-          return content.trim().toLowerCase().replace(/['"‘“’]/g, '');
+          return content.trim().replace(/['"‘“’]/g, '');
         });
 
-        const allowedSpeakers = [
-          'valmiki', 'sri_ram', 'sita', 'lakshmana', 'hanuman', 'ravana', 'dasharatha', 
-          'kaikeyi', 'kousalya', 'sumitra', 'bharata', 'shatrughna', 'sugriva', 'vibhishana', 
-          'manthara', 'surpanakha', 'indrajit', 'kumbhakarna', 'janaka', 'vishwamitra', 
-          'vashistha', 'jatayu', 'angada', 'maricha', 'shabari', 'guha', 'other'
-        ];
-        if (allowedSpeakers.includes(content)) {
-          return content;
+        // Split and validate format
+        const parts = content.split(':');
+        if (parts.length === 3) {
+          const charEn = parts[0].trim().toLowerCase().replace(/\s+/g, '_');
+          const charHi = parts[1].trim();
+          const gender = parts[2].trim().toLowerCase();
+          return `${charEn}:${charHi}:${gender}`;
         }
-        return 'other';
+        return 'other:अन्य:male';
 
       } catch (error) {
         if (isModelUnavailable(error)) {

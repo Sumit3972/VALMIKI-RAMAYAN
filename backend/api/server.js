@@ -48,26 +48,87 @@ const SPEAKER_VOICE_MAP = {
   'other': 'shubh'            // Default male voice
 };
 
+// Speaker Announcement Prefix for Audio Context Flow
+const SPEAKER_PREFIX_MAP = {
+  'sri_ram': { en: 'Shree Ram said: ', hi: 'श्री राम बोले: ' },
+  'sita': { en: 'Sita Ji said: ', hi: 'सीता जी बोलीं: ' },
+  'lakshmana': { en: 'Shree Lakshman said: ', hi: 'लक्ष्मण जी बोले: ' },
+  'hanuman': { en: 'Shree Hanuman said: ', hi: 'हनुमान जी बोले: ' },
+  'ravana': { en: 'Ravana said: ', hi: 'रावण बोला: ' },
+  'dasharatha': { en: 'King Dasharatha said: ', hi: 'राजा दशरथ बोले: ' },
+  'kaikeyi': { en: 'Kaikeyi said: ', hi: 'कैकेयी बोली: ' },
+  'kousalya': { en: 'Kausalya said: ', hi: 'कौशल्या बोलीं: ' },
+  'sumitra': { en: 'Sumitra said: ', hi: 'सुमित्रा बोलीं: ' },
+  'bharata': { en: 'Bharata said: ', hi: 'भरत बोले: ' },
+  'shatrughna': { en: 'Shatrughna said: ', hi: 'शत्रुघ्न बोले: ' },
+  'sugriva': { en: 'Sugriva said: ', hi: 'सुग्रीव बोले: ' },
+  'vibhishana': { en: 'Vibhishana said: ', hi: 'विभीषण बोले: ' },
+  'manthara': { en: 'Manthara said: ', hi: 'मंथरा बोली: ' },
+  'surpanakha': { en: 'Surpanakha said: ', hi: 'शूर्पणखा बोली: ' },
+  'indrajit': { en: 'Indrajit said: ', hi: 'इन्द्रजीत बोला: ' },
+  'kumbhakarna': { en: 'Kumbhakarna said: ', hi: 'कुम्भकर्ण बोला: ' },
+  'janaka': { en: 'King Janaka said: ', hi: 'राजा जनक बोले: ' },
+  'vishwamitra': { en: 'Sage Vishwamitra said: ', hi: 'महर्षि विश्वामित्र बोले: ' },
+  'vashistha': { en: 'Sage Vashistha said: ', hi: 'महर्षि वशिष्ठ बोले: ' },
+  'jatayu': { en: 'Jatayu said: ', hi: 'जटायु बोला: ' },
+  'angada': { en: 'Angada said: ', hi: 'अंगद बोले: ' },
+  'maricha': { en: 'Maricha said: ', hi: 'मारीच बोला: ' },
+  'shabari': { en: 'Shabari said: ', hi: 'शबरी बोलीं: ' },
+  'guha': { en: 'Guha said: ', hi: 'गुहा बोले: ' }
+};
+
 // Helper to determine the correct voice ID for a shloka
 async function getSpeakerVoiceForShloka(shloka) {
-  // If we already have a cached speaker_character, return mapped voice
-  if (shloka.speaker_character && shloka.speaker_character !== 'valmiki') {
-    return SPEAKER_VOICE_MAP[shloka.speaker_character] || 'ashutosh';
-  }
+  let speakerChar = shloka.speaker_character;
 
-  try {
-    const speakerChar = await classifySpeaker(shloka.sanskrit, shloka.translation);
-    if (speakerChar) {
-      await db.query('UPDATE ramayana_shlokas SET speaker_character = $1 WHERE id = $2', [speakerChar, shloka.id]);
-      shloka.speaker_character = speakerChar;
-      return SPEAKER_VOICE_MAP[speakerChar] || 'ashutosh';
+  if (!speakerChar) {
+    const MAX_RETRIES = 3;
+    let attempt = 0;
+    while (attempt < MAX_RETRIES) {
+      try {
+        const classified = await classifySpeaker(shloka.sanskrit, shloka.translation);
+        if (classified) {
+          await db.query('UPDATE ramayana_shlokas SET speaker_character = $1 WHERE id = $2', [classified, shloka.id]);
+          shloka.speaker_character = classified;
+          speakerChar = classified;
+          break;
+        }
+      } catch (err) {
+        attempt++;
+        console.error(`[Speaker Classification Error] Attempt ${attempt}/${MAX_RETRIES} for Shloka ${shloka.id}:`, err.message);
+        if (attempt >= MAX_RETRIES) {
+          break;
+        }
+        // Wait 1.5 seconds before retrying
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
     }
-  } catch (err) {
-    console.error(`[Speaker Classification Error] Shloka ${shloka.id}:`, err.message);
   }
 
-  // Default to Narrator (Valmiki)
-  return SPEAKER_VOICE_MAP['valmiki'];
+  // Fallback if classification completely failed
+  if (!speakerChar) {
+    speakerChar = 'valmiki:वाल्मीकि:male';
+  }
+
+  // Parse speaker character string (can be 'character_en:name_hi:gender' or old cached format 'character_en')
+  let charKey = speakerChar;
+  let gender = 'male';
+
+  if (speakerChar.includes(':')) {
+    const parts = speakerChar.split(':');
+    charKey = parts[0];
+    gender = parts[2] || 'male';
+  }
+
+  // Return mapped voice or fall back by gender
+  if (SPEAKER_VOICE_MAP[charKey]) {
+    return SPEAKER_VOICE_MAP[charKey];
+  }
+
+  if (gender === 'female') {
+    return 'shreya'; // Default female voice
+  }
+  return 'shubh'; // Default male voice
 }
 
 // Global endpoint concurrency limiters to protect Hugging Face container from freezes
@@ -322,13 +383,43 @@ fastify.post('/batch/audio', async (request, reply) => {
       langCode = type === 'hi' ? 'hi-IN' : 'en-IN';
     }
 
+    // Get dynamic character speaker voice
+    const voice = await getSpeakerVoiceForShloka(shloka);
+
+    // Prefix speaker context flow if it's a dialogue character (not valmiki)
+    const speakerChar = shloka.speaker_character || 'valmiki:वाल्मीकि:male';
+    let charKey = speakerChar;
+    let nameHi = '';
+    let gender = 'male';
+
+    if (speakerChar.includes(':')) {
+      const parts = speakerChar.split(':');
+      charKey = parts[0];
+      nameHi = parts[1];
+      gender = parts[2];
+    }
+
+    if (charKey !== 'valmiki') {
+      let prefix = '';
+      if (SPEAKER_PREFIX_MAP[charKey]) {
+        prefix = (type === 'en') ? SPEAKER_PREFIX_MAP[charKey].en : SPEAKER_PREFIX_MAP[charKey].hi;
+      } else {
+        // Construct dynamic prefix
+        if (type === 'en') {
+          const capitalizedName = charKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          prefix = `${capitalizedName} said: `;
+        } else {
+          const displayName = nameHi || charKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          prefix = (gender === 'female') ? `${displayName} बोलीं: ` : `${displayName} बोले: `;
+        }
+      }
+      textToProcess = prefix + textToProcess;
+    }
+
     // Chunk, generate TTS, upload — sequential within each task
     // (Sarvam rate limiter in sarvam.js handles the throttling)
     const chunks = chunkTextSafely(textToProcess, 2000);
     const audioUrls = [];
-
-    // Get dynamic character speaker voice
-    const voice = await getSpeakerVoiceForShloka(shloka);
 
     for (let i = 0; i < chunks.length; i++) {
       const audioBuffer = await generateTTSChunk(chunks[i], langCode, voice);
@@ -402,12 +493,42 @@ fastify.post('/audio', async (request, reply) => {
         langCode = type === 'hi' ? 'hi-IN' : 'en-IN';
       }
 
+      // Get dynamic character speaker voice
+      const voice = await getSpeakerVoiceForShloka(shloka);
+
+      // Prefix speaker context flow if it's a dialogue character (not valmiki)
+      const speakerChar = shloka.speaker_character || 'valmiki:वाल्मीकि:male';
+      let charKey = speakerChar;
+      let nameHi = '';
+      let gender = 'male';
+
+      if (speakerChar.includes(':')) {
+        const parts = speakerChar.split(':');
+        charKey = parts[0];
+        nameHi = parts[1];
+        gender = parts[2];
+      }
+
+      if (charKey !== 'valmiki') {
+        let prefix = '';
+        if (SPEAKER_PREFIX_MAP[charKey]) {
+          prefix = (type === 'en') ? SPEAKER_PREFIX_MAP[charKey].en : SPEAKER_PREFIX_MAP[charKey].hi;
+        } else {
+          // Construct dynamic prefix
+          if (type === 'en') {
+            const capitalizedName = charKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            prefix = `${capitalizedName} said: `;
+          } else {
+            const displayName = nameHi || charKey.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            prefix = (gender === 'female') ? `${displayName} बोलीं: ` : `${displayName} बोले: `;
+          }
+        }
+        textToProcess = prefix + textToProcess;
+      }
+
       // 4. Chunk Text
       const chunks = chunkTextSafely(textToProcess, 2000);
       const audioUrls = [];
-
-      // Get dynamic character speaker voice
-      const voice = await getSpeakerVoiceForShloka(shloka);
 
       // 5. Generate and Upload Chunks
       for (let i = 0; i < chunks.length; i++) {
