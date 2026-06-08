@@ -19,7 +19,7 @@ async function clearData() {
         audio_sanskrit_url = NULL,
         audio_english_url = NULL,
         audio_hindi_url = NULL,
-        speaker_character = 'valmiki'
+        speaker_character = NULL
     `);
 
     console.log(`Successfully cleared data for ${result.rowCount} shlokas.`);
