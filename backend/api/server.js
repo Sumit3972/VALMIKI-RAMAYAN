@@ -22,7 +22,7 @@ const SPEAKER_VOICE_MAP = {
   'valmiki': 'mani',          // Premium Tier-1 clear male narrator
   'sri_ram': 'aditya',        // Serene, clear male
   'sita': 'shreya',           // Sweet, elegant female
-  'lakshmana': 'rahul',       // Loyal, energetic male
+  'lakshmana': 'tarun',       // Assigned Tarun for professional/clear male voice
   'hanuman': 'varun',         // Strong male voice
   'ravana': 'amit',           // Powerful, booming male
   'dasharatha': 'ratan',      // Mature, older male

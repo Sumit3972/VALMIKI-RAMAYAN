@@ -152,7 +152,7 @@ async function generateTTSChunk(text, languageCode, speaker = 'shubh') {
         text: text,
         target_language_code: languageCode,
         speaker: speaker,
-        pace: 1.0,
+        pace: 1.15,
         model: 'bulbul:v3',
         speech_sample_rate: 48000,
         output_audio_codec: 'mp3'
