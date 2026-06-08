@@ -29,7 +29,7 @@ const SPEAKER_VOICE_MAP = {
   'kaikeyi': 'simran',        // Dramatic female voice
   'kousalya': 'ritu',         // Gentle motherly female voice
   'sumitra': 'suhani',        // Calm motherly female voice
-  'bharata': 'advait',        // Calm male voice
+  'bharata': 'rehan',         // Changed to Rehan (Tier-2 high quality pleasant male voice)
   'shatrughna': 'anand',      // Male voice
   'sugriva': 'kabir',         // Conversational male
   'vibhishana': 'sumit',      // Calm male
