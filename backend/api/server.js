@@ -86,7 +86,7 @@ async function getSpeakerVoiceForShloka(shloka) {
     let attempt = 0;
     while (attempt < MAX_RETRIES) {
       try {
-        const classified = await classifySpeaker(shloka.sanskrit, shloka.translation);
+        const classified = await classifySpeaker(shloka.sanskrit, shloka.translation, shloka);
         if (classified) {
           await db.query('UPDATE ramayana_shlokas SET speaker_character = $1 WHERE id = $2', [classified, shloka.id]);
           shloka.speaker_character = classified;
@@ -152,12 +152,12 @@ const AUDIO_CONCURRENCY = 2;       // 2 parallel TTS+upload pipelines
 async function getOrGenerateTranslation(shloka, lang) {
   if (lang === 'hi') {
     if (shloka.translation_hi) return shloka.translation_hi;
-    const newText = await generateTranslationPrep(shloka.sanskrit, shloka.translation, 'hi');
+    const newText = await generateTranslationPrep(shloka.sanskrit, shloka.translation, 'hi', shloka);
     await db.query('UPDATE ramayana_shlokas SET translation_hi = $1 WHERE id = $2', [newText, shloka.id]);
     return newText;
   } else {
     if (shloka.translation_tts_en) return shloka.translation_tts_en;
-    const newText = await generateTranslationPrep(shloka.sanskrit, shloka.translation, 'en');
+    const newText = await generateTranslationPrep(shloka.sanskrit, shloka.translation, 'en', shloka);
     await db.query('UPDATE ramayana_shlokas SET translation_tts_en = $1 WHERE id = $2', [newText, shloka.id]);
     return newText;
   }
