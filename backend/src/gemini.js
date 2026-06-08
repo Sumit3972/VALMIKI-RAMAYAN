@@ -117,6 +117,7 @@ async function generateTranslationPrep(sanskritText, existingTranslation, target
 - "रावण" जैसे खलनायकों के नाम यथावत रखें।
 - ऋषि-मुनियों के लिए "महर्षि", "मुनि", "ऋषि" आदि सम्मानसूचक शब्द प्रयोग करें।
 - भाषा सरल, स्वाभाविक और बोलचाल की हिंदी में हो।
+- **महत्वपूर्ण**: हमेशा मूल संस्कृत श्लोक का सीधे अनुवाद करें। संदर्भ अनुवाद (अंग्रेजी) केवल एक सहायता है। यदि अंग्रेजी संदर्भ अनुवाद गलत, अपूर्ण, या श्लोक से अलग है, तो उसे पूरी तरह अनदेखा करें और केवल मूल संस्कृत श्लोक का ही हिंदी में अनुवाद करें।
 
 आउटपुट संरचना — इन तीन भागों में उत्तर दें:
 
@@ -142,6 +143,7 @@ Honorifics:
 - Refer to "Lakshmana" as "Shree Lakshman".
 - Antagonists (e.g. Ravana) without honorifics.
 - Sages: use "Maharishi", "Sage", "Rishi".
+- **Important**: Always translate the Sanskrit shloka directly and faithfully. The reference English translation is ONLY a guide. If the reference translation is incorrect, incomplete, or does not correspond to the Sanskrit shloka, ignore it and translate the Sanskrit shloka directly from the original Sanskrit text.
 
 Output structure — respond in exactly these three sections:
 
