@@ -11,11 +11,64 @@ fastify.register(require('@fastify/cors'), {
 
 const db = require('../src/db');
 const { generateTTSChunk, chunkTextSafely } = require('../src/sarvam');
-const { generateTranslationPrep } = require('../src/gemini');
+const { generateTranslationPrep, classifySpeaker } = require('../src/gemini');
 const { uploadAudioToR2 } = require('../src/r2');
 const { runConcurrent } = require('../src/taskQueue');
 const { getKeyStats: getSarvamKeyStats } = require('../src/keyManager');
 const { getKeyStats: getGeminiKeyStats } = require('../src/geminiKeyManager');
+
+// Speaker to Voice Mapping for Sarvam AI TTS Bulbul V3
+const SPEAKER_VOICE_MAP = {
+  'valmiki': 'mani',          // Premium Tier-1 clear male narrator
+  'sri_ram': 'aditya',        // Serene, clear male
+  'sita': 'shreya',           // Sweet, elegant female
+  'lakshmana': 'rahul',       // Loyal, energetic male
+  'hanuman': 'varun',         // Strong male voice
+  'ravana': 'amit',           // Powerful, booming male
+  'dasharatha': 'ratan',      // Mature, older male
+  'kaikeyi': 'simran',        // Dramatic female voice
+  'kousalya': 'ritu',         // Gentle motherly female voice
+  'sumitra': 'suhani',        // Calm motherly female voice
+  'bharata': 'advait',        // Calm male voice
+  'shatrughna': 'anand',      // Male voice
+  'sugriva': 'kabir',         // Conversational male
+  'vibhishana': 'sumit',      // Calm male
+  'manthara': 'kavitha',      // Distinct/older female voice
+  'surpanakha': 'simran',     // Dramatic female voice
+  'indrajit': 'rohan',        // Young, fiery male voice
+  'kumbhakarna': 'amit',      // Loud, heavy male voice
+  'janaka': 'ratan',          // Wise, older male voice
+  'vishwamitra': 'mani',      // Authoritative male sage
+  'vashistha': 'mani',        // Wise male sage
+  'jatayu': 'dev',            // Elderly male bird character
+  'angada': 'aayan',          // Active young male monkey prince
+  'maricha': 'tarun',         // Deceptive male voice
+  'shabari': 'pooja',         // Devout elderly female voice
+  'guha': 'sunny',            // Friendly boatman / tribal king
+  'other': 'shubh'            // Default male voice
+};
+
+// Helper to determine the correct voice ID for a shloka
+async function getSpeakerVoiceForShloka(shloka) {
+  // If we already have a cached speaker_character, return mapped voice
+  if (shloka.speaker_character && shloka.speaker_character !== 'valmiki') {
+    return SPEAKER_VOICE_MAP[shloka.speaker_character] || 'ashutosh';
+  }
+
+  try {
+    const speakerChar = await classifySpeaker(shloka.sanskrit, shloka.translation);
+    if (speakerChar) {
+      await db.query('UPDATE ramayana_shlokas SET speaker_character = $1 WHERE id = $2', [speakerChar, shloka.id]);
+      shloka.speaker_character = speakerChar;
+      return SPEAKER_VOICE_MAP[speakerChar] || 'ashutosh';
+    }
+  } catch (err) {
+    console.error(`[Speaker Classification Error] Shloka ${shloka.id}:`, err.message);
+  }
+
+  // Default to Narrator (Valmiki)
+  return SPEAKER_VOICE_MAP['valmiki'];
+}
 
 // Global endpoint concurrency limiters to protect Hugging Face container from freezes
 const audioLimiter = new Bottleneck({
@@ -274,8 +327,11 @@ fastify.post('/batch/audio', async (request, reply) => {
     const chunks = chunkTextSafely(textToProcess, 2000);
     const audioUrls = [];
 
+    // Get dynamic character speaker voice
+    const voice = await getSpeakerVoiceForShloka(shloka);
+
     for (let i = 0; i < chunks.length; i++) {
-      const audioBuffer = await generateTTSChunk(chunks[i], langCode);
+      const audioBuffer = await generateTTSChunk(chunks[i], langCode, voice);
       const fileName = `k${shloka.kanda}_s${shloka.sarga}_sh${shloka.shloka_number}_${type}_pt${i+1}_${Date.now()}.mp3`;
       const publicUrl = await uploadAudioToR2(audioBuffer, fileName);
       audioUrls.push(publicUrl);
@@ -350,10 +406,13 @@ fastify.post('/audio', async (request, reply) => {
       const chunks = chunkTextSafely(textToProcess, 2000);
       const audioUrls = [];
 
+      // Get dynamic character speaker voice
+      const voice = await getSpeakerVoiceForShloka(shloka);
+
       // 5. Generate and Upload Chunks
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i];
-        const audioBuffer = await generateTTSChunk(chunkText, langCode);
+        const audioBuffer = await generateTTSChunk(chunkText, langCode, voice);
         
         const fileName = `k${shloka.kanda}_s${shloka.sarga}_sh${shloka.shloka_number}_${type}_pt${i+1}_${Date.now()}.mp3`;
         const publicUrl = await uploadAudioToR2(audioBuffer, fileName);
@@ -371,6 +430,49 @@ fastify.post('/audio', async (request, reply) => {
       return reply.status(500).send({ error: 'Failed to generate audio', details: err.message });
     }
   });
+});
+
+// ---------------------------------------------------------
+// GET /shlokas/search - Global Text Search
+// ---------------------------------------------------------
+fastify.get('/shlokas/search', async (request, reply) => {
+  const { q } = request.query;
+
+  if (!q || q.trim().length < 2) {
+    return reply.status(400).send({ error: 'Search query must be at least 2 characters long' });
+  }
+
+  try {
+    const searchTerm = `%${q.trim()}%`;
+    const result = await db.query(
+      `SELECT id, kanda, sarga, shloka_index, shloka_number, sanskrit, translation, translation_hi, speaker_character 
+       FROM ramayana_shlokas 
+       WHERE sanskrit ILIKE $1 
+          OR translation ILIKE $1 
+          OR translation_hi ILIKE $1 
+          OR translation_tts_en ILIKE $1
+       ORDER BY kanda ASC, sarga ASC, shloka_index ASC 
+       LIMIT 50`,
+      [searchTerm]
+    );
+
+    const results = result.rows.map(row => ({
+      id: row.id,
+      kanda: row.kanda,
+      sarga: row.sarga,
+      shloka_number: row.shloka_number,
+      sanskrit: row.sanskrit,
+      english: row.translation,
+      hindi: row.translation_hi || null,
+      speaker_character: row.speaker_character || 'valmiki'
+    }));
+
+    return { query: q, count: results.length, results };
+
+  } catch (err) {
+    fastify.log.error(err);
+    return reply.status(500).send({ error: 'Search failed', details: err.message });
+  }
 });
 
 // ---------------------------------------------------------

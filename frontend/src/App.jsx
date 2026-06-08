@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchShlokas, fetchTranslation, fetchAudioUrls, fetchMetadata } from './api';
-import { Volume2, Play, Pause, BookOpen, Loader2, ChevronDown, ChevronUp, Scroll, Languages, Headphones } from 'lucide-react';
+import { fetchShlokas, fetchTranslation, fetchAudioUrls, fetchMetadata, searchShlokas } from './api';
+import { Volume2, Play, Pause, BookOpen, Loader2, ChevronDown, ChevronUp, Scroll, Languages, Headphones, Search, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // ── Kanda Name Mapping ──────────────────────────────────────────────
@@ -11,7 +11,7 @@ const KANDA_NAMES = {
   4: { hindi: 'किष्किन्धाकाण्ड', english: 'Kishkindhakand', short: 'किष्किं' },
   5: { hindi: 'सुन्दरकाण्ड', english: 'Sundarkand', short: 'सुन्दर' },
   6: { hindi: 'युद्धकाण्ड', english: 'Yuddhakand', short: 'युद्ध' },
-  7: { hindi: 'उत्तरकाण्ड', english: 'Uttarakand', short: 'उत्तर' },
+
 };
 
 function getKandaLabel(kandaNum) {
@@ -44,6 +44,8 @@ function ShlokaCard({
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationError, setTranslationError] = useState(null);
   const [audioType, setAudioType] = useState('sanskrit');
+
+
 
   const handleToggleTranslation = () => {
     const nextShow = !showTranslation;
@@ -246,7 +248,7 @@ function ShlokaCard({
         <div className="border-t border-border pt-3">
           <button 
             onClick={handleToggleTranslation}
-            className="flex items-center gap-2 text-textMuted hover:text-primary transition-colors duration-200 text-xs font-medium group/btn"
+            className="flex items-center gap-2 text-textMuted hover:text-primary transition-colors duration-200 text-xs font-semibold group/btn"
           >
             <Languages className="w-3.5 h-3.5 group-hover/btn:text-primary transition-colors" />
             <span>{showTranslation ? 'Hide Translation' : 'View Translation'}</span>
@@ -363,6 +365,45 @@ function App() {
   // Resume states
   const [resumeState, setResumeState] = useState(null);
   const [shouldScrollToShloka, setShouldScrollToShloka] = useState(null);
+
+  // Theme State
+  const [theme, setTheme] = useState(() => localStorage.getItem('valmiki_ramayan_theme') || 'saffron');
+
+  // Sync Theme attribute on DOM root
+  useEffect(() => {
+    if (theme === 'saffron') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+    localStorage.setItem('valmiki_ramayan_theme', theme);
+  }, [theme]);
+
+  // Global Search State
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+
+  const handleSearchSubmit = async (e) => {
+    if (e) e.preventDefault();
+    if (searchQuery.trim().length < 2) return;
+
+    setIsSearching(true);
+    setSearchError(null);
+    setSearchResults([]);
+
+    try {
+      const data = await searchShlokas(searchQuery);
+      setSearchResults(data.results || []);
+    } catch (err) {
+      console.error(err);
+      setSearchError('Search failed. Please try again.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   // Load saved location on mount
   useEffect(() => {
@@ -591,8 +632,32 @@ function App() {
               <h1 className="sm:hidden text-sm font-serif font-bold text-glow">Ramayana</h1>
             </div>
             
-            {/* Selectors */}
+            {/* Controls Row */}
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Global Search trigger button */}
+              <button 
+                onClick={() => setSearchOpen(true)}
+                className="p-1.5 sm:p-2 bg-surfaceHighlight border border-white/10 rounded-lg text-textMuted hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center"
+                title="Search Shlokas"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+
+              {/* Theme selector */}
+              <div className="flex flex-col">
+                <label className="text-[9px] text-textMuted font-semibold uppercase tracking-[0.15em] mb-1 hidden sm:block">Theme</label>
+                <select 
+                  id="theme-select"
+                  className="bg-surfaceHighlight border border-white/10 rounded-lg px-2 sm:px-2.5 sm:py-2 text-xs sm:text-sm font-medium text-textMain focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all min-w-[70px] sm:min-w-[90px]"
+                  value={theme}
+                  onChange={e => setTheme(e.target.value)}
+                >
+                  <option value="saffron">Saffron</option>
+                  <option value="dandaka">Dandaka</option>
+                  <option value="setu">Setu</option>
+                </select>
+              </div>
+
               {/* Kanda selector */}
               <div className="flex flex-col">
                 <label className="text-[9px] text-textMuted font-semibold uppercase tracking-[0.15em] mb-1 hidden sm:block">Kanda</label>
@@ -754,6 +819,126 @@ function App() {
                 </button>
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Global Search Overlay Modal ── */}
+      <AnimatePresence>
+        {searchOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="glass-panel w-full max-w-2xl rounded-3xl overflow-hidden border border-white/10 shadow-2xl flex flex-col max-h-[85vh]"
+            >
+              {/* Search Header */}
+              <div className="p-4 sm:p-6 border-b border-white/5 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2 text-primary font-serif font-bold text-base">
+                  <Search className="w-5 h-5" />
+                  <span>Explore Ramayana</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setSearchOpen(false);
+                    setSearchQuery('');
+                    setSearchResults([]);
+                    setSearchError(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg hover:bg-white/5 text-textMuted hover:text-textSecondary text-xs font-semibold tracking-wider uppercase transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Input field */}
+              <div className="px-4 sm:px-6 py-4 border-b border-white/5 bg-surface/30">
+                <form onSubmit={handleSearchSubmit} className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder="Search Sanskrit shlokas, English, or Hindi translations..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-surfaceHighlight/50 border border-white/10 rounded-xl pl-4 pr-10 py-3 text-sm text-textMain placeholder:text-textMuted focus:border-primary/50 focus:ring-1 focus:ring-primary/20 outline-none transition-all"
+                      autoFocus
+                    />
+                    {isSearching && (
+                      <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={isSearching || searchQuery.trim().length < 2}
+                    className="px-5 py-3 bg-primary text-background rounded-xl text-sm font-bold shadow-lg shadow-primary/15 hover:bg-primary-hover disabled:opacity-40 transition-all btn-pill"
+                  >
+                    Search
+                  </button>
+                </form>
+                {searchQuery.trim().length > 0 && searchQuery.trim().length < 2 && (
+                  <p className="text-[10px] text-textMuted mt-1.5 ml-1">Type at least 2 characters to search</p>
+                )}
+              </div>
+
+              {/* Search Results list */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 scrollbar-thin">
+                {isSearching ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    <p className="text-xs text-textMuted">Searching ancient scriptures...</p>
+                  </div>
+                ) : searchError ? (
+                  <p className="text-sm text-accent text-center py-8">{searchError}</p>
+                ) : searchResults.length === 0 ? (
+                  <div className="text-center py-12">
+                    <p className="text-sm text-textMuted italic">
+                      {searchQuery ? "No matches found. Try searching for 'dharma', 'Rama', 'bow', or 'Sita'." : "Type keywords above to search across all Kandas and Sargas."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-textMuted font-semibold mb-2">Found {searchResults.length} matches</p>
+                    {searchResults.map((res) => (
+                      <div
+                        key={res.id}
+                        onClick={() => {
+                          setKanda(res.kanda);
+                          setSarga(res.sarga);
+                          setShouldScrollToShloka(res.id);
+                          setSearchOpen(false);
+                          setSearchQuery('');
+                          setSearchResults([]);
+                        }}
+                        className="p-4 rounded-xl bg-surfaceHighlight/40 border border-white/5 hover:border-primary/25 hover:bg-primary/5 cursor-pointer transition-all duration-200 group"
+                      >
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <span className="text-[10px] text-primary uppercase font-bold tracking-wider">
+                            {getKandaLabel(res.kanda)} — Sarga {res.sarga}
+                          </span>
+                          <span className="text-[10px] text-textMuted bg-surfaceHighlight px-2 py-0.5 rounded font-mono group-hover:text-textSecondary">
+                            {res.shloka_number}
+                          </span>
+                        </div>
+                        <p className="text-sm font-sanskrit text-textMain mb-2 leading-relaxed line-clamp-2">
+                          {res.sanskrit}
+                        </p>
+                        <p className="text-xs text-textMuted line-clamp-2 font-serif group-hover:text-textSecondary">
+                          {res.english}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

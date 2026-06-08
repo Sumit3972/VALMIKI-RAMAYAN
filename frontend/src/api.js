@@ -25,3 +25,8 @@ export const fetchAudioUrls = async (shlokaId, type) => {
   const res = await api.post('/audio', { shloka_id: shlokaId, type });
   return res.data;
 };
+
+export const searchShlokas = async (query) => {
+  const res = await api.get('/shlokas/search', { params: { q: query } });
+  return res.data;
+};

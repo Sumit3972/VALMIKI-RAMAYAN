@@ -247,4 +247,112 @@ function applyHonorifics(text, lang) {
   return text;
 }
 
-module.exports = { generateTranslationPrep };
+/**
+ * Classifies the speaker of a shloka using Gemini.
+ * Automatically rotates API key on quota exhaustion.
+ */
+async function classifySpeaker(sanskritText, englishTranslation) {
+  return limiter.schedule(async () => {
+    const models = ['gemini-3.1-flash-lite'];
+    let lastError = null;
+
+    for (const model of models) {
+      try {
+        console.log(`[Gemini] Attempting speaker classification using model: ${model}`);
+        const content = await callGeminiWithRetry(async (apiKey) => {
+          const systemPrompt = `You are an expert scholar of the Valmiki Ramayana.
+Analyze the given Sanskrit shloka and its English translation, and identify the primary character speaking these words.
+
+Respond with ONLY one of these exact lowercase strings:
+- 'valmiki' (use for all narration, descriptions, or when the narrator Valmiki is speaking)
+- 'sri_ram' (Shree Ram / Rama)
+- 'sita' (Mata Sita / Sita)
+- 'lakshmana' (Shree Lakshman / Lakshmana)
+- 'hanuman' (Shree Hanuman)
+- 'ravana' (Ravana)
+- 'dasharatha' (King Dasharatha)
+- 'kaikeyi' (Kaikeyi)
+- 'kousalya' (Kausalya)
+- 'sumitra' (Sumitra)
+- 'bharata' (Bharat / Bharata)
+- 'shatrughna' (Shatrughna)
+- 'sugriva' (Sugriva)
+- 'vibhishana' (Vibhishana)
+- 'manthara' (Manthara)
+- 'surpanakha' (Surpanakha)
+- 'indrajit' (Indrajit / Meghanada)
+- 'kumbhakarna' (Kumbhakarna)
+- 'janaka' (King Janaka)
+- 'vishwamitra' (Sage Vishwamitra)
+- 'vashistha' (Sage Vashistha)
+- 'jatayu' (Jatayu / Sampati)
+- 'angada' (Angada)
+- 'maricha' (Maricha)
+- 'shabari' (Shabari)
+- 'guha' (Guha / Nishadraj)
+- 'other' (any other character not listed)
+
+Do not include any punctuation, quotes, markdown, introduction, explanation, or additional text. Just the single string.`;
+
+          const userPrompt = `Shloka:
+${sanskritText}
+
+English Translation:
+${englishTranslation}`;
+
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const payload = {
+            systemInstruction: {
+              parts: [{ text: systemPrompt }]
+            },
+            contents: [{
+              parts: [{ text: userPrompt }]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 10,
+            }
+          };
+
+          const response = await axios.post(url, payload, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+
+          if (!response.data || !response.data.candidates || response.data.candidates.length === 0) {
+            throw new Error('Invalid response from Gemini API during classification');
+          }
+
+          let content = response.data.candidates[0].content?.parts?.[0]?.text;
+          if (!content) {
+            throw new Error('Empty content from Gemini API during classification');
+          }
+
+          return content.trim().toLowerCase().replace(/['"‘“’]/g, '');
+        });
+
+        const allowedSpeakers = [
+          'valmiki', 'sri_ram', 'sita', 'lakshmana', 'hanuman', 'ravana', 'dasharatha', 
+          'kaikeyi', 'kousalya', 'sumitra', 'bharata', 'shatrughna', 'sugriva', 'vibhishana', 
+          'manthara', 'surpanakha', 'indrajit', 'kumbhakarna', 'janaka', 'vishwamitra', 
+          'vashistha', 'jatayu', 'angada', 'maricha', 'shabari', 'guha', 'other'
+        ];
+        if (allowedSpeakers.includes(content)) {
+          return content;
+        }
+        return 'other';
+
+      } catch (error) {
+        if (isModelUnavailable(error)) {
+          console.warn(`[Gemini] ⚠️ Model ${model} unavailable (503) for classification. Falling back...`);
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError || new Error('ALL_FALLBACK_MODELS_FAILED for speaker classification.');
+  });
+}
+
+module.exports = { generateTranslationPrep, classifySpeaker };

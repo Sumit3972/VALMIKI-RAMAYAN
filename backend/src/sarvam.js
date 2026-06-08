@@ -142,17 +142,20 @@ function chunkTextSafely(text, limit = 2000) {
  * 
  * @param {string} text - The text to synthesize.
  * @param {string} languageCode - e.g., 'sa-IN', 'hi-IN', 'en-IN'
+ * @param {string} speaker - The speaker name/ID to use
  * @returns {Promise<Buffer>} The audio buffer.
  */
-async function generateTTSChunk(text, languageCode) {
+async function generateTTSChunk(text, languageCode, speaker = 'shubh') {
   return limiter.schedule(async () => {
     return callWithRetry(async (apiKey) => {
       const payload = {
         text: text,
         target_language_code: languageCode,
-        speaker: 'shubh',
+        speaker: speaker,
         pace: 1.0,
-        model: 'bulbul:v3'
+        model: 'bulbul:v3',
+        speech_sample_rate: 48000,
+        output_audio_codec: 'mp3'
       };
 
       const response = await axios.post(TTS_URL, payload, {

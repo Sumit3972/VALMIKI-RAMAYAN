@@ -1,19 +1,79 @@
 @import "tailwindcss";
 
+:root {
+  /* Default: Sacred Saffron Theme */
+  --bg-color: #0C0A09;
+  --surface-color: #1C1917;
+  --surface-highlight: #292524;
+  --surface-elevated: #44403C;
+  --primary-color: #F59E0B;
+  --primary-hover: #FBBF24;
+  --primary-dim: #92400E;
+  --accent-color: #EF4444;
+  --text-main: #FAFAF9;
+  --text-secondary: #D6D3D1;
+  --text-muted: #78716C;
+  --border-color: rgba(255, 255, 255, 0.06);
+  --border-active: rgba(245, 158, 11, 0.3);
+  --radial-gradient-colors: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(245, 158, 11, 0.08) 0%, transparent 60%),
+                            radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.03) 0%, transparent 40%),
+                            radial-gradient(circle at 0% 50%, rgba(239, 68, 68, 0.02) 0%, transparent 40%);
+}
+
+:root[data-theme="dandaka"] {
+  /* Forest Dandaka Theme */
+  --bg-color: #060F0A;
+  --surface-color: #0E1F15;
+  --surface-highlight: #183323;
+  --surface-elevated: #244C35;
+  --primary-color: #10B981;
+  --primary-hover: #34D399;
+  --primary-dim: #065F46;
+  --accent-color: #F59E0B;
+  --text-main: #F0FDF4;
+  --text-secondary: #DCFCE7;
+  --text-muted: #65A30D;
+  --border-color: rgba(255, 255, 255, 0.05);
+  --border-active: rgba(16, 185, 129, 0.3);
+  --radial-gradient-colors: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.08) 0%, transparent 60%),
+                            radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.03) 0%, transparent 40%),
+                            radial-gradient(circle at 0% 50%, rgba(245, 158, 11, 0.02) 0%, transparent 40%);
+}
+
+:root[data-theme="setu"] {
+  /* Ocean Setu Theme */
+  --bg-color: #030712;
+  --surface-color: #111827;
+  --surface-highlight: #1F2937;
+  --surface-elevated: #374151;
+  --primary-color: #06B6D4;
+  --primary-hover: #22D3EE;
+  --primary-dim: #0891B2;
+  --accent-color: #EC4899;
+  --text-main: #F9FAFB;
+  --text-secondary: #E5E7EB;
+  --text-muted: #9CA3AF;
+  --border-color: rgba(255, 255, 255, 0.05);
+  --border-active: rgba(6, 182, 212, 0.3);
+  --radial-gradient-colors: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.08) 0%, transparent 60%),
+                            radial-gradient(circle at 100% 100%, rgba(6, 182, 212, 0.03) 0%, transparent 40%),
+                            radial-gradient(circle at 0% 50%, rgba(236, 72, 153, 0.02) 0%, transparent 40%);
+}
+
 @theme {
-  --color-background: #0C0A09;
-  --color-surface: #1C1917;
-  --color-surface-highlight: #292524;
-  --color-surface-elevated: #44403C;
-  --color-primary: #F59E0B;
-  --color-primary-hover: #FBBF24;
-  --color-primary-dim: #92400E;
-  --color-accent: #EF4444;
-  --color-text-main: #FAFAF9;
-  --color-text-secondary: #D6D3D1;
-  --color-text-muted: #78716C;
-  --color-border: rgba(255, 255, 255, 0.06);
-  --color-border-active: rgba(245, 158, 11, 0.3);
+  --color-background: var(--bg-color);
+  --color-surface: var(--surface-color);
+  --color-surface-highlight: var(--surface-highlight);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-primary: var(--primary-color);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-dim: var(--primary-dim);
+  --color-accent: var(--accent-color);
+  --color-text-main: var(--text-main);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border-color);
+  --color-border-active: var(--border-active);
   
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Merriweather", ui-serif, "Georgia", serif;
@@ -48,20 +108,22 @@
   border-radius: 4px;
 }
 .content-scroll::-webkit-scrollbar-thumb {
-  background: rgba(245, 158, 11, 0.25);
+  background: var(--primary-color);
+  opacity: 0.25;
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 .content-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.45);
+  background: var(--primary-hover);
+  opacity: 0.45;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 /* Firefox */
 .content-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(245, 158, 11, 0.25) rgba(255, 255, 255, 0.02);
+  scrollbar-color: var(--primary-color) rgba(255, 255, 255, 0.02);
 }
 
 @layer base {
@@ -104,18 +166,15 @@
   }
   
   .text-glow {
-    text-shadow: 0 0 30px rgba(245, 158, 11, 0.3), 0 0 60px rgba(245, 158, 11, 0.1);
+    text-shadow: 0 0 30px var(--primary-color), 0 0 60px var(--primary-dim);
   }
 
   .text-glow-subtle {
-    text-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
+    text-shadow: 0 0 20px var(--primary-color);
   }
   
   .bg-gradient-sacred {
-    background: 
-      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(245, 158, 11, 0.08) 0%, transparent 60%),
-      radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.03) 0%, transparent 40%),
-      radial-gradient(circle at 0% 50%, rgba(239, 68, 68, 0.02) 0%, transparent 40%);
+    background: var(--radial-gradient-colors);
     background-attachment: fixed;
   }
 
@@ -124,7 +183,7 @@
   }
   .btn-pill:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+    box-shadow: 0 4px 12px var(--primary-dim);
   }
   .btn-pill:active {
     transform: translateY(0);
@@ -140,7 +199,7 @@
     inset: -1px;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), transparent 40%, transparent 60%, rgba(245, 158, 11, 0.1));
+    background: linear-gradient(135deg, var(--primary-color), transparent 40%, transparent 60%, var(--primary-dim));
     mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     mask-composite: exclude;
@@ -150,8 +209,8 @@
 
   /* Pulse animation for playing state */
   @keyframes audio-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
-    50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+    0%, 100% { box-shadow: 0 0 0 0 var(--border-active); }
+    50% { box-shadow: 0 0 0 8px rgba(0, 0, 0, 0); }
   }
   .audio-playing {
     animation: audio-pulse 2s ease-in-out infinite;
@@ -159,8 +218,8 @@
 
   /* Resume Highlight Animation */
   @keyframes border-flash {
-    0%, 100% { border-color: rgba(255, 255, 255, 0.06); box-shadow: none; }
-    50% { border-color: rgba(245, 158, 11, 0.8); box-shadow: 0 0 25px rgba(245, 158, 11, 0.4); }
+    0%, 100% { border-color: var(--border-color); box-shadow: none; }
+    50% { border-color: var(--primary-color); box-shadow: 0 0 25px var(--border-active); }
   }
   .resume-highlight {
     animation: border-flash 1.5s ease-in-out 2;
