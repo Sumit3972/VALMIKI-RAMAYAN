@@ -1,4 +1,3 @@
-const axios = require('axios');
 const Bottleneck = require('bottleneck');
 require('dotenv').config();
 
@@ -23,11 +22,11 @@ const limiter = new Bottleneck({
  * @returns {boolean}
  */
 function isQuotaExhausted(error) {
-  if (!error.response) return false;
+  const status = error.status || error.response?.status;
+  const data = error.response?.data;
   
-  const status = error.response.status;
-  const errorCode = error.response.data?.error?.code;
-  const errorMessage = error.response.data?.error?.message || '';
+  const errorCode = data?.error?.code;
+  const errorMessage = data?.error?.message || '';
 
   return (
     status === 429 ||
@@ -158,18 +157,33 @@ async function generateTTSChunk(text, languageCode, speaker = 'shubh') {
         output_audio_codec: 'mp3'
       };
 
-      const response = await axios.post(TTS_URL, payload, {
+      const response = await fetch(TTS_URL, {
+        method: 'POST',
         headers: {
           'api-subscription-key': apiKey,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify(payload)
       });
       
-      if (!response.data || !response.data.audios || response.data.audios.length === 0) {
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        let errorData = {};
+        try { errorData = JSON.parse(errorText); } catch(e) {}
+        
+        const err = new Error(`Request failed with status code ${response.status}`);
+        err.status = response.status;
+        err.response = { status: response.status, data: errorData };
+        throw err;
+      }
+
+      const data = await response.json();
+      
+      if (!data || !data.audios || data.audios.length === 0) {
         throw new Error('No audio returned from Sarvam API');
       }
 
-      const base64Audio = response.data.audios[0];
+      const base64Audio = data.audios[0];
       return Buffer.from(base64Audio, 'base64');
     });
   });

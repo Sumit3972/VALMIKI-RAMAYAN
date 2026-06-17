@@ -1,4 +1,3 @@
-const axios = require("axios");
 const Bottleneck = require("bottleneck");
 require("dotenv").config();
 
@@ -13,24 +12,24 @@ const limiter = new Bottleneck({
 });
 
 /**
- * Detects if an Axios error is a rate limit (429).
+ * Detects if an error is a rate limit (429).
  */
 function isRateLimited(error) {
-  if (!error.response) return false;
-  return error.response.status === 429;
+  const status = error.status || error.response?.status;
+  return status === 429;
 }
 
 /**
- * Detects if an Axios error is due to model overload/unavailability (503).
+ * Detects if an error is due to model overload/unavailability (503).
  */
 function isModelUnavailable(error) {
-  const response = error.response || error.originalError?.response;
-  if (!response) return false;
-
-  const is503 = response.status === 503;
+  const status = error.status || error.response?.status;
+  const data = error.response?.data;
+  
+  const is503 = status === 503;
   const hasUnavailableMessage =
-    response.data?.error?.message?.includes("experiencing high demand") ||
-    response.data?.error?.status === "UNAVAILABLE";
+    data?.error?.message?.includes("experiencing high demand") ||
+    data?.error?.status === "UNAVAILABLE";
 
   return is503 || hasUnavailableMessage;
 }
@@ -62,22 +61,37 @@ async function callLLM(
         stream: false,
       };
 
-      const response = await axios.post(url, payload, {
+      const response = await fetch(url, {
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${API_KEY}`,
         },
+        body: JSON.stringify(payload),
       });
 
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        let errorData = {};
+        try { errorData = JSON.parse(errorText); } catch(e) {}
+        
+        const err = new Error(`Request failed with status code ${response.status}`);
+        err.status = response.status;
+        err.response = { status: response.status, data: errorData };
+        throw err;
+      }
+
+      const data = await response.json();
+
       if (
-        !response.data ||
-        !response.data.choices ||
-        response.data.choices.length === 0
+        !data ||
+        !data.choices ||
+        data.choices.length === 0
       ) {
         throw new Error("Invalid response from API");
       }
 
-      const message = response.data.choices[0].message;
+      const message = data.choices[0].message;
       let content = message?.content;
 
       // Fallback: reasoning models may put output in reasoning_content if content is empty
@@ -91,7 +105,7 @@ async function callLLM(
       if (!content) {
         console.error(
           "[LLM] API returned empty content. Response:",
-          JSON.stringify(response.data),
+          JSON.stringify(data),
         );
         throw new Error("API returned empty content.");
       }
