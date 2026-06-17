@@ -1,13 +1,12 @@
-const fastify = require("fastify")({ logger: true });
+const { Hono } = require("hono");
+const { cors } = require("hono/cors");
+const app = new Hono();
+
 require("dotenv").config();
 const Bottleneck = require("bottleneck");
 
-// CORS — allow all origins
-fastify.register(require("@fastify/cors"), {
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-});
+// CORS middleware
+app.use("*", cors());
 
 const db = require("../src/db");
 const { generateTTSChunk, chunkTextSafely } = require("../src/sarvam");
@@ -152,11 +151,8 @@ const translateLimiter = new Bottleneck({
   maxConcurrent: 5, // Max 5 parallel translations globally
 });
 
-// Vercel free tier: max 60s execution time
-const VERCEL_MAX_DURATION = 60;
-
 // Concurrency caps — tuned for Sarvam's 60 req/min rate limit
-// and Vercel Hobby's resource constraints
+// and Workers/Vercel resource constraints
 const TRANSLATION_CONCURRENCY = 3; // 3 parallel LLM calls
 const AUDIO_CONCURRENCY = 2; // 2 parallel TTS+upload pipelines
 
@@ -252,27 +248,6 @@ async function getOrGenerateAudioDetails(shloka, lang) {
   return { speaker, translation };
 }
 
-// Helper to extract only the translation part from the structured Gemini string for TTS
-function extractTranslationText(raw) {
-  if (!raw) return "";
-  const translationMatch = raw.match(
-    /\|\|\|TRANSLATION\|\|\|([\s\S]*?)(?=\|\|\|CONTEXT\|\|\||\|\|\|INSIGHT\|\|\||$)/,
-  );
-  let text = translationMatch ? translationMatch[1].trim() : raw.trim();
-  // Strip any lingering header words at the very beginning of the translation
-  text = text
-    .replace(
-      /^(translation|context|insight|अनुवाद|संदर्भ|विशेष दृष्टि)\s*[:：-]*\s*/i,
-      "",
-    )
-    .replace(
-      /^(1\.\s*translation|2\.\s*context|3\.\s*insight)\s*[:：-]*\s*/i,
-      "",
-    )
-    .trim();
-  return text;
-}
-
 // Helper to safely parse JSON arrays from the DB text columns
 function parseUrls(urlStr) {
   if (!urlStr) return [];
@@ -287,7 +262,7 @@ function parseUrls(urlStr) {
 // ---------------------------------------------------------
 // GET /metadata - Fetch available Kandas and Sargas
 // ---------------------------------------------------------
-fastify.get("/metadata", async (request, reply) => {
+app.get("/metadata", async (c) => {
   try {
     const result = await db.query(
       `SELECT kanda, json_agg(DISTINCT sarga ORDER BY sarga ASC) as sargas
@@ -295,21 +270,22 @@ fastify.get("/metadata", async (request, reply) => {
        GROUP BY kanda
        ORDER BY kanda ASC`,
     );
-    return reply.send({ metadata: result.rows });
+    return c.json({ metadata: result.rows });
   } catch (error) {
     console.error("Metadata error:", error);
-    return reply.status(500).send({ error: "Internal Server Error" });
+    return c.json({ error: "Internal Server Error" }, 500);
   }
 });
 
 // ---------------------------------------------------------
 // GET /shlokas - Text Only (Fast DB Fetch)
 // ---------------------------------------------------------
-fastify.get("/shlokas", async (request, reply) => {
-  const { kanda, sarga } = request.query;
+app.get("/shlokas", async (c) => {
+  const kanda = c.req.query("kanda");
+  const sarga = c.req.query("sarga");
 
   if (!kanda || !sarga) {
-    return reply.status(400).send({ error: "kanda and sarga are required" });
+    return c.json({ error: "kanda and sarga are required" }, 400);
   }
 
   try {
@@ -319,7 +295,7 @@ fastify.get("/shlokas", async (request, reply) => {
     );
 
     if (result.rows.length === 0) {
-      return reply.status(404).send({ error: "No shlokas found." });
+      return c.json({ error: "No shlokas found." }, 404);
     }
 
     const shlokas = result.rows.map((row) => ({
@@ -332,23 +308,22 @@ fastify.get("/shlokas", async (request, reply) => {
       hindi: row.translation_hi || null, // Send null if missing, Frontend will request it on-demand
     }));
 
-    return { kanda, sarga, count: shlokas.length, shlokas };
+    return c.json({ kanda, sarga, count: shlokas.length, shlokas });
   } catch (err) {
-    fastify.log.error(err);
-    return reply
-      .status(500)
-      .send({ error: "Internal server error", details: err.message });
+    console.error(err);
+    return c.json({ error: "Internal server error", details: err.message }, 500);
   }
 });
 
 // ---------------------------------------------------------
 // POST /translate - On-Demand LLM Translation
 // ---------------------------------------------------------
-fastify.post("/translate", async (request, reply) => {
-  const { shloka_id, lang } = request.body; // lang: 'hi' or 'en' (for TTS prep)
+app.post("/translate", async (c) => {
+  const body = await c.req.json();
+  const { shloka_id, lang } = body; // lang: 'hi' or 'en' (for TTS prep)
 
   if (!shloka_id || !["hi", "en"].includes(lang)) {
-    return reply.status(400).send({ error: "Invalid shloka_id or lang" });
+    return c.json({ error: "Invalid shloka_id or lang" }, 400);
   }
 
   // Queue translation to prevent database key conflicts during simultaneous rotations
@@ -359,42 +334,38 @@ fastify.post("/translate", async (request, reply) => {
         [shloka_id],
       );
       if (result.rows.length === 0)
-        return reply.status(404).send({ error: "Shloka not found" });
+        return c.json({ error: "Shloka not found" }, 404);
 
       const shloka = result.rows[0];
       const newText = await getOrGenerateTranslation(shloka, lang);
 
-      return { shloka_id, lang, text: newText };
+      return c.json({ shloka_id, lang, text: newText });
     } catch (err) {
-      fastify.log.error(err);
-      return reply
-        .status(500)
-        .send({ error: "Failed to translate", details: err.message });
+      console.error(err);
+      return c.json({ error: "Failed to translate", details: err.message }, 500);
     }
   });
 });
 
 // ---------------------------------------------------------
 // POST /batch/translate - Concurrent Multi-Shloka Translation
-// Processes up to 20 shlokas concurrently within Vercel's 60s limit
 // ---------------------------------------------------------
-fastify.post("/batch/translate", async (request, reply) => {
-  const { items } = request.body; // items: [{ shloka_id, lang }]
+app.post("/batch/translate", async (c) => {
+  const body = await c.req.json();
+  const { items } = body; // items: [{ shloka_id, lang }]
 
   if (!Array.isArray(items) || items.length === 0) {
-    return reply.status(400).send({ error: "items array is required" });
+    return c.json({ error: "items array is required" }, 400);
   }
 
   if (items.length > 20) {
-    return reply.status(400).send({ error: "Maximum 20 items per batch" });
+    return c.json({ error: "Maximum 20 items per batch" }, 400);
   }
 
   // Validate all items upfront
   for (const item of items) {
     if (!item.shloka_id || !["hi", "en"].includes(item.lang)) {
-      return reply
-        .status(400)
-        .send({ error: `Invalid item: ${JSON.stringify(item)}` });
+      return c.json({ error: `Invalid item: ${JSON.stringify(item)}` }, 400);
     }
   }
 
@@ -419,37 +390,33 @@ fastify.post("/batch/translate", async (request, reply) => {
   // Execute with bounded concurrency
   const results = await runConcurrent(tasks, TRANSLATION_CONCURRENCY);
 
-  return {
+  return c.json({
     total: items.length,
     succeeded: results.filter((r) => r.status === "fulfilled").length,
     failed: results.filter((r) => r.status === "rejected").length,
     results,
-  };
+  });
 });
 
 // ---------------------------------------------------------
 // POST /batch/audio - Concurrent Multi-Shloka Audio Generation
-// Processes up to 10 shlokas concurrently within Vercel's 60s limit
 // ---------------------------------------------------------
-fastify.post("/batch/audio", async (request, reply) => {
-  const { items } = request.body; // items: [{ shloka_id, type }]
+app.post("/batch/audio", async (c) => {
+  const body = await c.req.json();
+  const { items } = body; // items: [{ shloka_id, type }]
 
   if (!Array.isArray(items) || items.length === 0) {
-    return reply.status(400).send({ error: "items array is required" });
+    return c.json({ error: "items array is required" }, 400);
   }
 
   if (items.length > 10) {
-    return reply
-      .status(400)
-      .send({ error: "Maximum 10 items per batch (audio is expensive)" });
+    return c.json({ error: "Maximum 10 items per batch (audio is expensive)" }, 400);
   }
 
   // Validate all items upfront
   for (const item of items) {
     if (!item.shloka_id || !["sanskrit", "hi", "en"].includes(item.type)) {
-      return reply
-        .status(400)
-        .send({ error: `Invalid item: ${JSON.stringify(item)}` });
+      return c.json({ error: `Invalid item: ${JSON.stringify(item)}` }, 400);
     }
   }
 
@@ -487,6 +454,7 @@ fastify.post("/batch/audio", async (request, reply) => {
 
     // Get speaker and translation in a single operation
     const details = await getOrGenerateAudioDetails(shloka, type);
+    const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
     let textToProcess = details.translation;
     let langCode = type === "en" ? "en-IN" : "hi-IN";
 
@@ -494,7 +462,6 @@ fastify.post("/batch/audio", async (request, reply) => {
     const voice = await getSpeakerVoiceForShloka(shloka);
 
     // Prefix speaker context flow if it's a dialogue character (not valmiki)
-    const speakerChar = shloka.speaker_character || "valmiki:वाल्मीकि:male";
     let charKey = speakerChar;
     let nameHi = "";
     let gender = "male";
@@ -562,24 +529,23 @@ fastify.post("/batch/audio", async (request, reply) => {
   // Execute with bounded concurrency
   const results = await runConcurrent(tasks, AUDIO_CONCURRENCY);
 
-  return {
+  return c.json({
     total: items.length,
     succeeded: results.filter((r) => r.status === "fulfilled").length,
     failed: results.filter((r) => r.status === "rejected").length,
     results,
-  };
+  });
 });
 
 // ---------------------------------------------------------
 // POST /audio - On-Demand Real-Time Audio Generation
 // ---------------------------------------------------------
-fastify.post("/audio", async (request, reply) => {
-  const { shloka_id, type } = request.body; // type: 'sanskrit', 'hi', 'en'
+app.post("/audio", async (c) => {
+  const body = await c.req.json();
+  const { shloka_id, type } = body; // type: 'sanskrit', 'hi', 'en'
 
   if (!shloka_id || !["sanskrit", "hi", "en"].includes(type)) {
-    return reply
-      .status(400)
-      .send({ error: "Invalid shloka_id or type (must be sanskrit, hi, en)" });
+    return c.json({ error: "Invalid shloka_id or type (must be sanskrit, hi, en)" }, 400);
   }
 
   // Bounded concurrency queue to protect container memory and event loop from freezes
@@ -591,7 +557,7 @@ fastify.post("/audio", async (request, reply) => {
         [shloka_id],
       );
       if (result.rows.length === 0) {
-        return reply.status(404).send({ error: "Shloka not found" });
+        return c.json({ error: "Shloka not found" }, 404);
       }
       const shloka = result.rows[0];
 
@@ -605,11 +571,12 @@ fastify.post("/audio", async (request, reply) => {
 
       if (shloka[columnName]) {
         // Already generated and chunked! Return the array.
-        return { type, urls: parseUrls(shloka[columnName]) };
+        return c.json({ type, urls: parseUrls(shloka[columnName]) });
       }
 
       // 3. Prepare Text and Speaker Character in a single operation
       const details = await getOrGenerateAudioDetails(shloka, type);
+      const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
       let textToProcess = details.translation;
       let langCode = type === "en" ? "en-IN" : "hi-IN";
 
@@ -617,7 +584,6 @@ fastify.post("/audio", async (request, reply) => {
       const voice = await getSpeakerVoiceForShloka(shloka);
 
       // Prefix speaker context flow if it's a dialogue character (not valmiki)
-      const speakerChar = shloka.speaker_character || "valmiki:वाल्मीकि:male";
       let charKey = speakerChar;
       let nameHi = "";
       let gender = "male";
@@ -681,12 +647,10 @@ fastify.post("/audio", async (request, reply) => {
         [stringifiedUrls, shloka_id],
       );
 
-      return { type, urls: audioUrls };
+      return c.json({ type, urls: audioUrls });
     } catch (err) {
-      fastify.log.error(err);
-      return reply
-        .status(500)
-        .send({ error: "Failed to generate audio", details: err.message });
+      console.error(err);
+      return c.json({ error: "Failed to generate audio", details: err.message }, 500);
     }
   });
 });
@@ -694,13 +658,11 @@ fastify.post("/audio", async (request, reply) => {
 // ---------------------------------------------------------
 // GET /shlokas/search - Global Text Search
 // ---------------------------------------------------------
-fastify.get("/shlokas/search", async (request, reply) => {
-  const { q } = request.query;
+app.get("/shlokas/search", async (c) => {
+  const q = c.req.query("q");
 
   if (!q || q.trim().length < 2) {
-    return reply
-      .status(400)
-      .send({ error: "Search query must be at least 2 characters long" });
+    return c.json({ error: "Search query must be at least 2 characters long" }, 400);
   }
 
   try {
@@ -728,19 +690,17 @@ fastify.get("/shlokas/search", async (request, reply) => {
       speaker_character: row.speaker_character || "valmiki",
     }));
 
-    return { query: q, count: results.length, results };
+    return c.json({ query: q, count: results.length, results });
   } catch (err) {
-    fastify.log.error(err);
-    return reply
-      .status(500)
-      .send({ error: "Search failed", details: err.message });
+    console.error(err);
+    return c.json({ error: "Search failed", details: err.message }, 500);
   }
 });
 
 // ---------------------------------------------------------
 // GET /api-keys/status - Monitor API Key Pool Health
 // ---------------------------------------------------------
-fastify.get("/api-keys/status", async (request, reply) => {
+app.get("/api-keys/status", async (c) => {
   try {
     const sarvamStats = await getSarvamKeyStats();
     const sarvamActive = sarvamStats.filter(
@@ -750,7 +710,7 @@ fastify.get("/api-keys/status", async (request, reply) => {
       (k) => k.status === "expired",
     ).length;
 
-    return {
+    return c.json({
       sarvam: {
         total: sarvamStats.length,
         active: sarvamActive,
@@ -767,36 +727,24 @@ fastify.get("/api-keys/status", async (request, reply) => {
           { label: "default", status: "active", masked_key: "sk-gynEZ...UHYh" },
         ],
       },
-    };
+    });
   } catch (err) {
-    fastify.log.error(err);
-    return reply.status(500).send({ error: "Failed to fetch key stats" });
+    console.error(err);
+    return c.json({ error: "Failed to fetch key stats" }, 500);
   }
 });
 
-const start = async () => {
-  try {
-    fastify.server.timeout = VERCEL_MAX_DURATION * 1000;
-    await fastify.listen({ port: process.env.PORT || 3000, host: "0.0.0.0" });
-    fastify.log.info(
-      `Vercel-Optimized API Pipeline running on port ${fastify.server.address().port}`,
-    );
-    fastify.log.info(
-      `Concurrency: Translation=${TRANSLATION_CONCURRENCY}, Audio=${AUDIO_CONCURRENCY}`,
-    );
-  } catch (err) {
-    fastify.log.error(err);
-    process.exit(1);
-  }
-};
+module.exports = app;
 
-// If running locally, start the server
+// If running locally via Node.js
 if (require.main === module) {
-  start();
+  const { serve } = require("@hono/node-server");
+  const port = process.env.PORT || 3000;
+  serve({
+    fetch: app.fetch,
+    port: Number(port)
+  }, (info) => {
+    console.log(`Hono Server listening at http://localhost:${info.port}`);
+    console.log(`Concurrency: Translation=${TRANSLATION_CONCURRENCY}, Audio=${AUDIO_CONCURRENCY}`);
+  });
 }
-
-// Export for Vercel Serverless Functions
-module.exports = async (req, res) => {
-  await fastify.ready();
-  fastify.server.emit("request", req, res);
-};

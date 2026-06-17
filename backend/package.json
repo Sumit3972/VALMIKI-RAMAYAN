@@ -9,7 +9,12 @@
     "seed": "node scripts/seed_keys.js",
     "upload": "node scripts/upload.js"
   },
-  "keywords": ["ramayana", "api", "tts", "translation"],
+  "keywords": [
+    "ramayana",
+    "api",
+    "tts",
+    "translation"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Valmiki Ramayana API — Translation, TTS, and Audio pipeline",
@@ -17,10 +22,12 @@
     "@aws-sdk/client-s3": "^3.1040.0",
     "@aws-sdk/s3-request-presigner": "^3.1040.0",
     "@fastify/cors": "^11.2.0",
+    "@hono/node-server": "^2.0.5",
     "axios": "^1.15.2",
     "bottleneck": "^2.19.5",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
+    "hono": "^4.12.25",
     "pg": "^8.20.0"
   }
 }
