@@ -25,6 +25,16 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// Global error handler to print error stack and return details as JSON
+app.onError((err, c) => {
+  console.error('[Hono Error Tracker]:', err);
+  return c.json({ 
+    error: 'Internal Server Error', 
+    message: err.message, 
+    stack: err.stack 
+  }, 500);
+});
+
 const db = require("../src/db");
 const { generateTTSChunk, chunkTextSafely } = require("../src/sarvam");
 const { generateTranslationPrep, generateAudioTranslationPrep, generateAudioDetailsPrep, classifySpeaker } = require("../src/gemini");
