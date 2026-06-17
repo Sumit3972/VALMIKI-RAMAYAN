@@ -164,7 +164,7 @@ async function generateTranslationPrep(
   context = {},
 ) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-pro"];
+    const models = ["deepseek-v4-flash"];
     let lastError = null;
 
     for (const model of models) {
@@ -300,7 +300,7 @@ function applyHonorifics(text, lang) {
  */
 async function classifySpeaker(sanskritText, englishTranslation, context = {}) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-pro"];
+    const models = ["deepseek-v4-flash"];
     let lastError = null;
 
     for (const model of models) {
@@ -419,7 +419,7 @@ async function generateAudioTranslationPrep(
   context = {},
 ) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-pro"];
+    const models = ["deepseek-v4-flash"];
     let lastError = null;
 
     for (const model of models) {
