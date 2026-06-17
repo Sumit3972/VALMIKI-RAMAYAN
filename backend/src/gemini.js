@@ -6,9 +6,10 @@ const API_KEY = "sk-gynEZUNUo5UI4Y2dUiFZpNnh6w04zDZeu8m0t6oxMr4MHUYh";
 const BASE_URL = "https://agentrouter-proxy.sumitmehta396.workers.dev/v1";
 
 // Rate limiter to prevent overwhelming the API
+// Allow up to 10 concurrent LLM calls so parallel audio requests don't serialize and timeout
 const limiter = new Bottleneck({
-  minTime: 2000,
-  maxConcurrent: 1,
+  minTime: 200,
+  maxConcurrent: 10,
 });
 
 /**
@@ -75,7 +76,7 @@ async function callLLM(
         let errorData = {};
         try { errorData = JSON.parse(errorText); } catch(e) {}
         
-        const err = new Error(`Request failed with status code ${response.status}`);
+        const err = new Error(`Request failed with status code ${response.status}. Response: ${errorText}`);
         err.status = response.status;
         err.response = { status: response.status, data: errorData };
         throw err;

@@ -8,10 +8,11 @@ const TTS_URL = 'https://api.sarvam.ai/text-to-speech';
 // Max retries = number of keys we could rotate through
 const MAX_KEY_RETRIES = 7;
 
-// Sarvam Starter tier rate limit is 60 req/min (1 per second)
+// Sarvam Starter tier rate limit is 60 req/min
+// Allow 6 concurrent TTS calls — multiple keys enable higher throughput
 const limiter = new Bottleneck({
-  minTime: 1050,
-  maxConcurrent: 1
+  minTime: 200,
+  maxConcurrent: 6
 });
 
 /**

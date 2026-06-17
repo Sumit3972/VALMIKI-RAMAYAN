@@ -1,7 +1,7 @@
 name = "ramayana-api"
 main = "src/worker.js"
 compatibility_date = "2026-06-17"
-compatibility_flags = [ "nodejs_compat" ]
+compatibility_flags = [ "nodejs_compat", "global_fetch_strictly_public" ]
 
 [vars]
 DATABASE_URL = "postgresql://postgres.hwkbqxmmgqgukwraifky:Sumit3972%401@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
