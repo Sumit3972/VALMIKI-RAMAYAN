@@ -1,27 +1,27 @@
-const { Pool } = require('pg');
+const { Client } = require('pg');
 require('dotenv').config();
 
-let pool;
-
-function getPool() {
-  if (!pool) {
-    const connectionString = process.env.DATABASE_URL;
-    pool = new Pool({
-      connectionString: connectionString,
-      max: 5,
-      idleTimeoutMillis: 10000
-    });
-
-    pool.on('error', (err) => {
-      console.error('Unexpected error on idle database client:', err.message);
+async function query(text, params) {
+  const connectionString = process.env.DATABASE_URL;
+  const client = new Client({
+    connectionString: connectionString
+  });
+  
+  await client.connect();
+  try {
+    return await client.query(text, params);
+  } finally {
+    await client.end().catch(err => {
+      console.error('Error closing database client:', err.message);
     });
   }
-  return pool;
 }
 
 module.exports = {
-  query: (text, params) => getPool().query(text, params),
+  query,
   get pool() {
-    return getPool();
+    return {
+      query: (t, p) => query(t, p)
+    };
   }
 };
