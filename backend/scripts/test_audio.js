@@ -22,8 +22,8 @@ async function test() {
       audio_english_url: shloka.audio_english_url
     });
 
-    console.log('\nClearing audio URLs and speaker_character for shloka 1 to force classification & regeneration...');
-    await db.query('UPDATE ramayana_shlokas SET speaker_character = NULL, audio_sanskrit_url = NULL, audio_hindi_url = NULL, audio_english_url = NULL WHERE id = 1');
+    console.log('\nClearing audio URLs, speaker_character, and audio translations for shloka 1 to force classification & regeneration...');
+    await db.query('UPDATE ramayana_shlokas SET speaker_character = NULL, audio_sanskrit_url = NULL, audio_hindi_url = NULL, audio_english_url = NULL, audio_translation_hi = NULL, audio_translation_en = NULL WHERE id = 1');
 
     console.log('\nGenerating Sanskrit audio (which triggers speaker classification)...');
     let res = await axios.post('http://127.0.0.1:3000/audio', { shloka_id: 1, type: 'sanskrit' });

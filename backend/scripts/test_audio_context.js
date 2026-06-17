@@ -5,7 +5,7 @@ require('dotenv').config();
 async function test() {
   try {
     console.log('Clearing shloka 1 to force classification...');
-    await db.query('UPDATE ramayana_shlokas SET speaker_character = NULL, audio_sanskrit_url = NULL, audio_hindi_url = NULL, audio_english_url = NULL WHERE id = 1');
+    await db.query('UPDATE ramayana_shlokas SET speaker_character = NULL, audio_sanskrit_url = NULL, audio_hindi_url = NULL, audio_english_url = NULL, audio_translation_hi = NULL, audio_translation_en = NULL WHERE id = 1');
 
     // We will test if single audio generation runs successfully.
     // Shloka 1 classification will typically classify as 'valmiki' narrator.
@@ -18,8 +18,8 @@ async function test() {
     console.log('DB Speaker Character after classification:', shlokaRes.rows[0].speaker_character);
 
     // Now, force speaker_character to 'sri_ram' to test prefix generation.
-    console.log('\nForcing speaker_character of shloka 1 to "sri_ram" and clearing audio URLs...');
-    await db.query("UPDATE ramayana_shlokas SET speaker_character = 'sri_ram', audio_sanskrit_url = NULL, audio_hindi_url = NULL, audio_english_url = NULL WHERE id = 1");
+    console.log('\nForcing speaker_character of shloka 1 to "sri_ram" and clearing audio URLs and translations...');
+    await db.query("UPDATE ramayana_shlokas SET speaker_character = 'sri_ram', audio_sanskrit_url = NULL, audio_hindi_url = NULL, audio_english_url = NULL, audio_translation_hi = NULL, audio_translation_en = NULL WHERE id = 1");
 
     console.log('\nGenerating Hindi audio for shloka 1 (now forced to "sri_ram" - should prefix with "श्री राम बोले: ")...');
     res = await axios.post('http://127.0.0.1:3000/audio', { shloka_id: 1, type: 'hi' });

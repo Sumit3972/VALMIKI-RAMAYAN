@@ -409,4 +409,112 @@ ${englishTranslation}`;
   });
 }
 
-module.exports = { generateTranslationPrep, classifySpeaker };
+/**
+ * Uses the LLM to generate a concise translation for TTS audio narration (only what the shloka says).
+ */
+async function generateAudioTranslationPrep(
+  sanskritText,
+  existingTranslation,
+  targetLanguage,
+  context = {},
+) {
+  return limiter.schedule(async () => {
+    const models = ["deepseek-v4-pro"];
+    let lastError = null;
+
+    for (const model of models) {
+      try {
+        console.log(`[LLM] Attempting audio translation using model: ${model}`);
+
+        const systemPrompt = `You are an expert Sanskrit scholar specializing in the Valmiki Ramayana.
+Provide a direct, faithful, and clear translation of the Sanskrit shloka.
+
+Rules:
+1. Don't explain too much. Only translate what the shloka says directly and faithfully.
+2. Do NOT add any extra context, commentary, explanation, philosophical insight, spiritual interpretation, or background details.
+3. Keep the translation simple, natural, concise, and reverent.
+4. Honorifics:
+   - Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
+   - Refer to "Sita" as "Mata Sita" or "Devi Sita".
+   - Refer to "Hanuman" as "Shree Hanuman".
+   - Refer to "Lakshmana" as "Shree Lakshman".
+   - Antagonists (e.g. Ravana) without honorifics.
+   - Sages: use "Maharishi", "Sage", "Rishi".
+5. Kanda and Sarga context rules: In the translation, only mention characters and events that are appropriate for the current Kanda's narrative and timeline. Do not mention inactive or future characters (e.g., Shree Hanuman does not appear in Ayodhya Kanda).
+6. Output structure: Respond ONLY with the translation text. Do not include any title, prefix (like "Translation:"), labels, bullet points, markdown, or numbering.
+
+${
+  targetLanguage === "hi"
+    ? "IMPORTANT: You must write the translation in HINDI language. Use natural, simple, conversational Hindi."
+    : "Write the translation in English."
+}`;
+
+        const { kanda, sarga, shloka_number } = context || {};
+        let contextSection = "";
+        if (kanda && sarga) {
+          const kDetails = KANDA_DETAILS[kanda] || {
+            english: `Kanda ${kanda}`,
+            hindi: `Kanda ${kanda}`,
+            description: "",
+          };
+          contextSection = `Shloka context:
+- Kanda (Book): ${kDetails.english} - ${kDetails.description}
+- Sarga (Chapter): ${sarga}
+- Shloka Number: ${shloka_number || "N/A"}\n\n`;
+        }
+
+        let userPrompt = "";
+        if (targetLanguage === "hi") {
+          userPrompt = existingTranslation?.trim()
+            ? `${contextSection}Translate this Valmiki Ramayana shloka to Hindi. WRITE THE OUTPUT ONLY IN HINDI.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}Translate this Valmiki Ramayana shloka to Hindi. WRITE THE OUTPUT ONLY IN HINDI.\n\nShloka:\n${sanskritText}`;
+        } else {
+          userPrompt = existingTranslation?.trim()
+            ? `${contextSection}Translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}Translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}`;
+        }
+
+        let content = await callLLM(
+          model,
+          systemPrompt,
+          userPrompt,
+          0.3, // Lower temperature for more direct, literal translation
+          40000,
+        );
+
+        // Post-processing: clean up markdown artifacts
+        content = content
+          .replace(/^\s*[\*\-•]\s*/gm, "")
+          .replace(/\*\*/g, "")
+          .replace(/\*/g, "")
+          .replace(/`/g, "")
+          .replace(/^#+\s*/gm, "")
+          .replace(/\[.*?\]\(.*?\)/g, "")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+
+        // Enforce honorifics on the translation
+        content = applyHonorifics(content, targetLanguage);
+
+        return content;
+      } catch (error) {
+        if (isModelUnavailable(error)) {
+          console.warn(
+            `[LLM] ⚠️ Model ${model} is unavailable (503) for audio translation. Falling back...`,
+          );
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw (
+      lastError ||
+      new Error("ALL_FALLBACK_MODELS_FAILED: All fallback models failed for audio translation.")
+    );
+  });
+}
+
+module.exports = { generateTranslationPrep, generateAudioTranslationPrep, classifySpeaker };
+

@@ -11,7 +11,7 @@ fastify.register(require("@fastify/cors"), {
 
 const db = require("../src/db");
 const { generateTTSChunk, chunkTextSafely } = require("../src/sarvam");
-const { generateTranslationPrep, classifySpeaker } = require("../src/gemini");
+const { generateTranslationPrep, generateAudioTranslationPrep, classifySpeaker } = require("../src/gemini");
 const { uploadAudioToR2 } = require("../src/r2");
 const { runConcurrent } = require("../src/taskQueue");
 const { getKeyStats: getSarvamKeyStats } = require("../src/keyManager");
@@ -185,6 +185,37 @@ async function getOrGenerateTranslation(shloka, lang) {
     );
     await db.query(
       "UPDATE ramayana_shlokas SET translation_tts_en = $1 WHERE id = $2",
+      [newText, shloka.id],
+    );
+    return newText;
+  }
+}
+
+// Helper to get or generate audio translation (short, direct explanation of shloka)
+async function getOrGenerateAudioTranslation(shloka, lang) {
+  if (lang === "hi") {
+    if (shloka.audio_translation_hi) return shloka.audio_translation_hi;
+    const newText = await generateAudioTranslationPrep(
+      shloka.sanskrit,
+      shloka.translation,
+      "hi",
+      shloka,
+    );
+    await db.query(
+      "UPDATE ramayana_shlokas SET audio_translation_hi = $1 WHERE id = $2",
+      [newText, shloka.id],
+    );
+    return newText;
+  } else {
+    if (shloka.audio_translation_en) return shloka.audio_translation_en;
+    const newText = await generateAudioTranslationPrep(
+      shloka.sanskrit,
+      shloka.translation,
+      "en",
+      shloka,
+    );
+    await db.query(
+      "UPDATE ramayana_shlokas SET audio_translation_en = $1 WHERE id = $2",
       [newText, shloka.id],
     );
     return newText;
@@ -432,7 +463,7 @@ fastify.post("/batch/audio", async (request, reply) => {
       textToProcess = shloka.sanskrit;
       langCode = "hi-IN";
     } else {
-      const rawText = await getOrGenerateTranslation(shloka, type);
+      const rawText = await getOrGenerateAudioTranslation(shloka, type);
       textToProcess = extractTranslationText(rawText);
       langCode = type === "hi" ? "hi-IN" : "en-IN";
     }
@@ -564,7 +595,7 @@ fastify.post("/audio", async (request, reply) => {
         langCode = "hi-IN"; // Sanskrit uses Devanagari; hi-IN is the closest supported TTS language
       } else {
         // Ensure the TTS-prepped translation exists
-        const rawText = await getOrGenerateTranslation(shloka, type);
+        const rawText = await getOrGenerateAudioTranslation(shloka, type);
         textToProcess = extractTranslationText(rawText);
         langCode = type === "hi" ? "hi-IN" : "en-IN";
       }
