@@ -487,7 +487,6 @@ fastify.post("/batch/audio", async (request, reply) => {
 
     // Get speaker and translation in a single operation
     const details = await getOrGenerateAudioDetails(shloka, type);
-    const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
     let textToProcess = details.translation;
     let langCode = type === "en" ? "en-IN" : "hi-IN";
 
@@ -611,7 +610,6 @@ fastify.post("/audio", async (request, reply) => {
 
       // 3. Prepare Text and Speaker Character in a single operation
       const details = await getOrGenerateAudioDetails(shloka, type);
-      const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
       let textToProcess = details.translation;
       let langCode = type === "en" ? "en-IN" : "hi-IN";
 
