@@ -1,6 +1,6 @@
 name = "ramayana-api"
 main = "src/worker.js"
-compatibility_date = "2024-03-01"
+compatibility_date = "2026-06-17"
 compatibility_flags = [ "nodejs_compat" ]
 
 # Local/Dev Environment variables

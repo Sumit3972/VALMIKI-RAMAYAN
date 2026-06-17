@@ -142,19 +142,18 @@ async function getSpeakerVoiceForShloka(shloka) {
   return "shubh"; // Default male voice
 }
 
-// Global endpoint concurrency limiters to protect Hugging Face container from freezes
+// Global endpoint concurrency limiters optimized for Cloudflare Workers
 const audioLimiter = new Bottleneck({
-  maxConcurrent: 4, // Max 4 parallel audio generations globally
+  maxConcurrent: 15, // Max 15 parallel audio generations globally
 });
 
 const translateLimiter = new Bottleneck({
-  maxConcurrent: 5, // Max 5 parallel translations globally
+  maxConcurrent: 20, // Max 20 parallel translations globally
 });
 
-// Concurrency caps — tuned for Sarvam's 60 req/min rate limit
-// and Workers/Vercel resource constraints
-const TRANSLATION_CONCURRENCY = 3; // 3 parallel LLM calls
-const AUDIO_CONCURRENCY = 2; // 2 parallel TTS+upload pipelines
+// Concurrency caps for batch operations
+const TRANSLATION_CONCURRENCY = 15; // 15 parallel LLM calls
+const AUDIO_CONCURRENCY = 8; // 8 parallel TTS+upload pipelines
 
 // Helper to get or generate translation
 async function getOrGenerateTranslation(shloka, lang) {
