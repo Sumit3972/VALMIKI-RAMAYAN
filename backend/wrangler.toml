@@ -4,10 +4,13 @@ compatibility_date = "2026-06-17"
 compatibility_flags = [ "nodejs_compat" ]
 
 [vars]
-DATABASE_URL = "postgresql://postgres.hwkbqxmmgqgukwraifky:Sumit3972%401@aws-1-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+DATABASE_URL = "postgresql://postgres.hwkbqxmmgqgukwraifky:Sumit3972%401@aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
 R2_ACCOUNT_ID = "025ab15adb97c94e86120104c6d9c195"
 R2_ACCESS_KEY_ID = "ba2918f283dd13ee1ee9c17a9ddb2c83"
 R2_SECRET_ACCESS_KEY = "835268844e554b27626f88d1f4b9fc173c405fdd385dd770cdd69df18e935a21"
 R2_BUCKET_NAME = "ramayana-audio"
 R2_PUBLIC_DEV_URL = "https://pub-51626f8110eb49438934f72a48887c0d.r2.dev"
 PORT = "3000"
+
+[observability]
+enabled = true

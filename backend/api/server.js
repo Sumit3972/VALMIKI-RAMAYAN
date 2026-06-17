@@ -8,6 +8,23 @@ const Bottleneck = require("bottleneck");
 // CORS middleware
 app.use("*", cors());
 
+// Environment variables injection middleware for Cloudflare Workers
+app.use("*", async (c, next) => {
+  if (c.env) {
+    if (typeof process === "undefined") {
+      globalThis.process = { env: {} };
+    } else if (!process.env) {
+      process.env = {};
+    }
+    for (const [key, value] of Object.entries(c.env)) {
+      if (typeof value === "string") {
+        process.env[key] = value;
+      }
+    }
+  }
+  await next();
+});
+
 const db = require("../src/db");
 const { generateTTSChunk, chunkTextSafely } = require("../src/sarvam");
 const { generateTranslationPrep, generateAudioTranslationPrep, generateAudioDetailsPrep, classifySpeaker } = require("../src/gemini");
@@ -275,6 +292,8 @@ app.get("/metadata", async (c) => {
     return c.json({ error: "Internal Server Error" }, 500);
   }
 });
+
+
 
 // ---------------------------------------------------------
 // GET /shlokas - Text Only (Fast DB Fetch)

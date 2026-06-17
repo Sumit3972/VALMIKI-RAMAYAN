@@ -1,12 +1,27 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+let pool;
+
+function getPool() {
+  if (!pool) {
+    const connectionString = process.env.DATABASE_URL;
+    pool = new Pool({
+      connectionString: connectionString,
+      max: 1,
+      idleTimeoutMillis: 1000
+    });
+
+    pool.on('error', (err) => {
+      console.error('Unexpected error on idle database client:', err.message);
+    });
+  }
+  return pool;
+}
 
 module.exports = {
-  query: (text, params) => pool.query(text, params),
-  pool
+  query: (text, params) => getPool().query(text, params),
+  get pool() {
+    return getPool();
+  }
 };
