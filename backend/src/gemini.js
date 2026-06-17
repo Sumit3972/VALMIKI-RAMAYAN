@@ -1,33 +1,23 @@
-const axios = require('axios');
-const Bottleneck = require('bottleneck');
-require('dotenv').config();
+const axios = require("axios");
+const Bottleneck = require("bottleneck");
+require("dotenv").config();
 
-const { getActiveKey, rotateKey, markExpired, recordUsage } = require('./geminiKeyManager');
+// Hardcoded API key and base URL for OpenAI-compatible API
+const API_KEY = "sk-gynEZUNUo5UI4Y2dUiFZpNnh6w04zDZeu8m0t6oxMr4MHUYh";
+const BASE_URL = "https://agentrouter-proxy.sumitmehta396.workers.dev/v1";
 
-// Max retries = number of keys we could rotate through
-const MAX_KEY_RETRIES = 16;
-
-// Gemini 2.5 Flash Free Tier allows 15 RPM.
-// We set minTime to 4200ms (approx 14.3 req/min) to stay safely under the limit per key.
+// Rate limiter to prevent overwhelming the API
 const limiter = new Bottleneck({
-  minTime: 4200,
-  maxConcurrent: 1
+  minTime: 2000,
+  maxConcurrent: 1,
 });
 
 /**
- * Detects if an Axios error is a temporary rate limit (429).
+ * Detects if an Axios error is a rate limit (429).
  */
 function isRateLimited(error) {
   if (!error.response) return false;
   return error.response.status === 429;
-}
-
-/**
- * Detects if an Axios error is a permanent authentication/leak error (400, 403).
- */
-function isInvalidKey(error) {
-  if (!error.response) return false;
-  return error.response.status === 403 || error.response.status === 400;
 }
 
 /**
@@ -38,114 +28,150 @@ function isModelUnavailable(error) {
   if (!response) return false;
 
   const is503 = response.status === 503;
-  const hasUnavailableMessage = 
-    response.data?.error?.message?.includes('experiencing high demand') || 
-    response.data?.error?.status === 'UNAVAILABLE';
+  const hasUnavailableMessage =
+    response.data?.error?.message?.includes("experiencing high demand") ||
+    response.data?.error?.status === "UNAVAILABLE";
 
   return is503 || hasUnavailableMessage;
 }
 
 /**
- * Executes an API call with automatic key rotation on quota exhaustion.
+ * Calls the OpenAI-compatible API with retry on rate limits.
  */
-async function callGeminiWithRetry(requestFn) {
+async function callLLM(
+  model,
+  systemPrompt,
+  userPrompt,
+  temperature,
+  maxTokens,
+  maxRetries = 3,
+) {
   let lastError = null;
 
-  for (let attempt = 0; attempt < MAX_KEY_RETRIES; attempt++) {
-    let apiKey;
-    
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      apiKey = await getActiveKey();
-    } catch (err) {
-      throw err; // No active keys left at all
-    }
+      const url = `${BASE_URL}/chat/completions`;
+      const payload = {
+        model: model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: temperature,
+        max_tokens: maxTokens,
+        stream: false,
+      };
 
-    try {
-      const result = await requestFn(apiKey);
-      
-      recordUsage(apiKey).catch(e => 
-        console.error('[GeminiKeyManager] Failed to record usage:', e.message)
-      );
-      
-      return result;
+      const response = await axios.post(url, payload, {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${API_KEY}`,
+        },
+      });
 
+      if (
+        !response.data ||
+        !response.data.choices ||
+        response.data.choices.length === 0
+      ) {
+        throw new Error("Invalid response from API");
+      }
+
+      const message = response.data.choices[0].message;
+      let content = message?.content;
+
+      // Fallback: reasoning models may put output in reasoning_content if content is empty
+      if (!content && message?.reasoning_content) {
+        console.log(
+          "[LLM] Content was empty, using reasoning_content as fallback",
+        );
+        content = message.reasoning_content;
+      }
+
+      if (!content) {
+        console.error(
+          "[LLM] API returned empty content. Response:",
+          JSON.stringify(response.data),
+        );
+        throw new Error("API returned empty content.");
+      }
+
+      return content;
     } catch (error) {
       if (isRateLimited(error)) {
-        console.warn(`[Gemini] 🔄 Key quota exhausted (attempt ${attempt + 1}/${MAX_KEY_RETRIES}). Rotating to next key...`);
-        await rotateKey(apiKey);
+        console.warn(
+          `[LLM] Rate limited (attempt ${attempt + 1}/${maxRetries}). Retrying with backoff...`,
+        );
         lastError = error;
-        // Loop continues
-      } else if (isInvalidKey(error)) {
-        console.error(`[Gemini] 🚨 Key is INVALID or LEAKED (attempt ${attempt + 1}/${MAX_KEY_RETRIES}). Permanently expiring...`);
-        await markExpired(apiKey);
-        lastError = error;
-        // Loop continues
-      } else {
-        throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.pow(2, attempt) * 1000),
+        );
+        continue;
       }
+      throw error;
     }
   }
 
-  const err = new Error('ALL_KEYS_EXHAUSTED: All Gemini API keys are currently rate limited. Please try again in a minute.');
-  err.statusCode = 503;
-  err.originalError = lastError;
-  throw err;
+  throw lastError || new Error("Max retries exceeded");
 }
 
 const KANDA_DETAILS = {
-  1: { english: 'Bala Kanda', hindi: 'बालकाण्ड', description: 'Early life of Shree Ram, his education, marriage to Mata Sita, and protection of sages.' },
-  2: { english: 'Ayodhya Kanda', hindi: 'अयोध्याकाण्ड', description: 'Preparations for Shree Ram\'s coronation, Kaikeyi\'s demands, exile of Shree Ram, Mata Sita, and Shree Lakshman, death of King Dasharatha, and Bharata\'s arrival to meet Ram at Chitrakoot. Note that Shree Hanuman does NOT appear in this book.' },
-  3: { english: 'Aranya Kanda', hindi: 'अरण्यकाण्ड', description: 'Forest life of Shree Ram, Mata Sita, and Shree Lakshman. Abduction of Mata Sita by Ravana, and Shree Ram\'s grief-stricken search.' },
-  4: { english: 'Kishkindha Kanda', hindi: 'किष्किन्धाकाण्ड', description: 'Shree Ram meets Shree Hanuman and Sugriva in the monkey kingdom of Kishkindha. Alliance is formed, Vali is slain, and the search party for Mata Sita is dispatched.' },
-  5: { english: 'Sundara Kanda', hindi: 'सुन्दरकाण्ड', description: 'Shree Hanuman\'s heroic leap across the ocean to Lanka, search for Mata Sita, finding her in Ashok Vatika, destroying the grove, and returning to Shree Ram.' },
-  6: { english: 'Yuddha Kanda', hindi: 'युद्धकाण्ड', description: 'Construction of Rama\'s Bridge (Ram Setu), march of the vanara army to Lanka, battle with Ravana\'s army, slaying of Ravana, rescue of Mata Sita, and return to Ayodhya for Shree Ram\'s coronation.' }
+  1: {
+    english: "Bala Kanda",
+    hindi: "बालकाण्ड",
+    description:
+      "Early life of Shree Ram, his education, marriage to Mata Sita, and protection of sages.",
+  },
+  2: {
+    english: "Ayodhya Kanda",
+    hindi: "अयोध्याकाण्ड",
+    description:
+      "Preparations for Shree Ram's coronation, Kaikeyi's demands, exile of Shree Ram, Mata Sita, and Shree Lakshman, death of King Dasharatha, and Bharata's arrival to meet Ram at Chitrakoot. Note that Shree Hanuman does NOT appear in this book.",
+  },
+  3: {
+    english: "Aranya Kanda",
+    hindi: "अरण्यकाण्ड",
+    description:
+      "Forest life of Shree Ram, Mata Sita, and Shree Lakshman. Abduction of Mata Sita by Ravana, and Shree Ram's grief-stricken search.",
+  },
+  4: {
+    english: "Kishkindha Kanda",
+    hindi: "किष्किन्धाकाण्ड",
+    description:
+      "Shree Ram meets Shree Hanuman and Sugriva in the monkey kingdom of Kishkindha. Alliance is formed, Vali is slain, and the search party for Mata Sita is dispatched.",
+  },
+  5: {
+    english: "Sundara Kanda",
+    hindi: "सुन्दरकाण्ड",
+    description:
+      "Shree Hanuman's heroic leap across the ocean to Lanka, search for Mata Sita, finding her in Ashok Vatika, destroying the grove, and returning to Shree Ram.",
+  },
+  6: {
+    english: "Yuddha Kanda",
+    hindi: "युद्धकाण्ड",
+    description:
+      "Construction of Rama's Bridge (Ram Setu), march of the vanara army to Lanka, battle with Ravana's army, slaying of Ravana, rescue of Mata Sita, and return to Ayodhya for Shree Ram's coronation.",
+  },
 };
 
 /**
- * Uses Gemini to generate a perfectly TTS-formatted translation.
- * Automatically rotates API key on quota exhaustion.
+ * Uses the LLM to generate a perfectly TTS-formatted translation.
  */
-async function generateTranslationPrep(sanskritText, existingTranslation, targetLanguage, context = {}) {
+async function generateTranslationPrep(
+  sanskritText,
+  existingTranslation,
+  targetLanguage,
+  context = {},
+) {
   return limiter.schedule(async () => {
-    const models = ['gemini-3.1-flash-lite'];
+    const models = ["deepseek-v4-pro"];
     let lastError = null;
 
     for (const model of models) {
       try {
-        console.log(`[Gemini] Attempting translation using model: ${model}`);
-        const content = await callGeminiWithRetry(async (apiKey) => {
+        console.log(`[LLM] Attempting translation using model: ${model}`);
 
-          const systemPrompt = targetLanguage === 'hi'
-            ? `आप वाल्मीकि रामायण के विशेषज्ञ संस्कृत-से-हिंदी अनुवादक और टीकाकार हैं। यह एक पवित्र धार्मिक ग्रंथ है।
-
-अनुवाद के नियम:
-- "राम" को सदैव "श्री राम" लिखें।
-- "सीता" को "माता सीता" या "सीता जी" लिखें।
-- "हनुमान" को "श्री हनुमान" या "हनुमान जी" लिखें।
-- "लक्ष्मण" को "लक्ष्मण जी" लिखें।
-- "रावण" जैसे खलनायकों के नाम यथावत रखें।
-- ऋषि-मुनियों के लिए "महर्षि", "मुनि", "ऋषि" आदि सम्मानसूचक शब्द प्रयोग करें।
-- भाषा सरल, स्वाभाविक और बोलचाल की हिंदी में हो।
-- **काण्ड और सर्ग के अनुसार संदर्भ नियम**: अनुवाद और संदर्भ में केवल उन्हीं पात्रों और घटनाओं का उल्लेख करें जो वर्तमान काण्ड की कथा और समय चक्र के अनुकूल हों। उदाहरण के लिए, अयोध्याकाण्ड (Ayodhya Kanda) में हनुमान जी का कोई उल्लेख या आगमन नहीं होता है, अतः अयोध्याकाण्ड के श्लोकों में भूलकर भी हनुमान जी या अन्य बाद के पात्रों के नाम न लिखें।
-- अनुवाद और संदर्भ में किसी भी प्रकार की काल्पनिक (hallucinated) पात्रों की संगति न जोड़ें।
-- **महत्वपूर्ण**: हमेशा मूल संस्कृत श्लोक का सीधे अनुवाद करें। संदर्भ अनुवाद (अंग्रेजी) केवल एक सहायता है। यदि अंग्रेजी संदर्भ अनुवाद गलत, अपूर्ण, या श्लोक से अलग है, तो उसे पूरी तरह अनदेखा करें और केवल मूल संस्कृत श्लोक का ही हिंदी में अनुवाद करें।
-
-आउटपुट संरचना — इन तीन भागों में उत्तर दें:
-
-1. अनुवाद (2-3 वाक्य, श्लोक का सटीक व प्रवाहमान अनुवाद):
-|||TRANSLATION|||
-[यहाँ केवल अनुवाद का पाठ लिखें, कोई "अनुवाद:" शीर्षक या उपसर्ग न लगाएं]
-
-2. संदर्भ (2-4 वाक्य, श्लोक का प्रसंग, पात्र, घटना का संक्षिप्त परिचय):
-|||CONTEXT|||
-[यहाँ केवल प्रसंग/संदर्भ का पाठ लिखें, कोई "संदर्भ:" शीर्षक या उपसर्ग न लगाएं]
-
-3. विशेष दृष्टि (श्लोक से जुड़ी कोई गहरी आध्यात्मिक, दार्शनिक, नैतिक या व्यावहारिक जीवन से संबंधित प्रेरणादायक अंतर्दृष्टि अवश्य लिखें):
-|||INSIGHT|||
-[यहाँ केवल अंतर्दृष्टि का पाठ लिखें, कोई "विशेष दृष्टि:" शीर्षक या उपसर्ग न लगाएं]
-
-कोई बुलेट पॉइंट, तारांकन, मार्कडाउन या क्रमांक न लगाएं।`
-            : `You are an expert Sanskrit scholar and commentator specializing in the Valmiki Ramayana.
+        const systemPrompt = `You are an expert Sanskrit scholar and commentator specializing in the Valmiki Ramayana.
 
 Honorifics:
 - Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
@@ -172,88 +198,68 @@ Output structure — respond in exactly these three sections:
 |||INSIGHT|||
 [Write only the insight text here, do not add any "Insight:" title or prefix]
 
+${
+  targetLanguage === "hi"
+    ? "\n\nIMPORTANT: You must write ALL output (Translation, Context, and Insight) in HINDI language. Use natural, simple, conversational Hindi. Keep all honorifics as specified above."
+    : "\n\nWrite all output in English."
+}
+
 No bullet points, no markdown, no asterisks, no numbering.`;
 
-          const { kanda, sarga, shloka_number } = context || {};
-          let contextSection = '';
-          if (kanda && sarga) {
-            const kDetails = KANDA_DETAILS[kanda] || { english: `Kanda ${kanda}`, hindi: `काण्ड ${kanda}`, description: '' };
-            if (targetLanguage === 'hi') {
-              contextSection = `श्लोक का संदर्भ (Location context of the shloka):
-- काण्ड (Kanda): ${kDetails.hindi} (${kDetails.english}) - ${kDetails.description}
-- सर्ग (Sarga): ${sarga}
-- श्लोक संख्या (Shloka Number): ${shloka_number || 'N/A'}
-(ध्यान दें: चरित्रों और घटनाओं की व्याख्या करते समय इस काण्ड के संदर्भ का पूर्ण ध्यान रखें। उदाहरण के लिए, अयोध्याकाण्ड में हनुमान जी या अन्य बाद के पात्र नहीं आते हैं, अतः अनुवाद या प्रसंग में उनके नाम की कोई भूल न करें।)\n\n`;
-            } else {
-              contextSection = `Shloka context:
-- Kanda (Book): ${kDetails.english} (${kDetails.hindi}) - ${kDetails.description}
-- Sarga (Chapter): ${sarga}
-- Shloka Number: ${shloka_number || 'N/A'}
-(Important: Keep the timeline and character presence of this specific Kanda in mind. For example, Shree Hanuman and other characters from later books do NOT appear in Ayodhya Kanda. Do not hallucinate or mention their names in the translation, context, or insight if they are not in the text.)\n\n`;
-            }
-          }
-
-          let userPrompt = '';
-          if (targetLanguage === 'hi') {
-            userPrompt = existingTranslation?.trim()
-              ? `${contextSection}इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}\n\nसंदर्भ अनुवाद (सटीकता के लिए देखें):\n${existingTranslation}`
-              : `${contextSection}इस वाल्मीकि रामायण के श्लोक का अनुवाद, संदर्भ और विशेष दृष्टि निर्देशानुसार लिखें।\n\nश्लोक:\n${sanskritText}`;
-          } else {
-            userPrompt = existingTranslation?.trim()
-              ? `${contextSection}Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
-              : `${contextSection}Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}`;
-          }
-
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-          const payload = {
-            systemInstruction: {
-              parts: [{ text: systemPrompt }]
-            },
-            contents: [{
-              parts: [{ text: userPrompt }]
-            }],
-            generationConfig: {
-              temperature: 0.65,
-              maxOutputTokens: 65536,
-            }
+        const { kanda, sarga, shloka_number } = context || {};
+        let contextSection = "";
+        if (kanda && sarga) {
+          const kDetails = KANDA_DETAILS[kanda] || {
+            english: `Kanda ${kanda}`,
+            hindi: `Kanda ${kanda}`,
+            description: "",
           };
+          contextSection = `Shloka context:
+- Kanda (Book): ${kDetails.english} - ${kDetails.description}
+- Sarga (Chapter): ${sarga}
+- Shloka Number: ${shloka_number || "N/A"}
+(Important: Keep the timeline and character presence of this specific Kanda in mind. For example, Shree Hanuman and other characters from later books do NOT appear in Ayodhya Kanda. Do not hallucinate or mention their names in the translation, context, or insight if they are not in the text.)\n\n`;
+        }
 
-          const response = await axios.post(url, payload, {
-            headers: { 'Content-Type': 'application/json' }
-          });
+        let userPrompt = "";
+        if (targetLanguage === "hi") {
+          userPrompt = existingTranslation?.trim()
+            ? `${contextSection}Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed. WRITE ALL OUTPUT IN HINDI.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed. WRITE ALL OUTPUT IN HINDI.\n\nShloka:\n${sanskritText}`;
+        } else {
+          userPrompt = existingTranslation?.trim()
+            ? `${contextSection}Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}Provide the translation, context, and insight for this Valmiki Ramayana shloka as instructed.\n\nShloka:\n${sanskritText}`;
+        }
 
-          if (!response.data || !response.data.candidates || response.data.candidates.length === 0) {
-            throw new Error('Invalid response from Gemini API');
-          }
+        let content = await callLLM(
+          model,
+          systemPrompt,
+          userPrompt,
+          0.65,
+          65536,
+        );
 
-          let content = response.data.candidates[0].content?.parts?.[0]?.text;
-          
-          if (!content) {
-            console.error('Gemini returned empty content. Response:', JSON.stringify(response.data));
-            throw new Error('Gemini returned empty content.');
-          }
+        // Post-processing: clean up markdown artifacts but preserve our section delimiters
+        content = content
+          .replace(/^\s*[\*\-•]\s*/gm, "")
+          .replace(/\*\*/g, "")
+          .replace(/\*/g, "")
+          .replace(/`/g, "")
+          .replace(/^#+\s*/gm, "")
+          .replace(/\[.*?\]\(.*?\)/g, "")
+          .replace(/\s{2,}/g, " ")
+          .trim();
 
-          // Post-processing: clean up markdown artifacts but preserve our section delimiters
-          content = content
-            .replace(/^\s*[\*\-•]\s*/gm, '')
-            .replace(/\*\*/g, '')
-            .replace(/\*/g, '')
-            .replace(/`/g, '')
-            .replace(/^#+\s*/gm, '')
-            .replace(/\[.*?\]\(.*?\)/g, '')
-            .replace(/\s{2,}/g, ' ')
-            .trim();
-
-          // Enforce honorifics on the full structured content
-          content = applyHonorifics(content, targetLanguage);
-
-          return content;
-        });
+        // Enforce honorifics on the full structured content
+        content = applyHonorifics(content, targetLanguage);
 
         return content;
       } catch (error) {
         if (isModelUnavailable(error)) {
-          console.warn(`[Gemini] ⚠️ Model ${model} is experiencing high demand (503). Falling back to next model...`);
+          console.warn(
+            `[LLM] ⚠️ Model ${model} is unavailable (503). Falling back to next model...`,
+          );
           lastError = error;
           continue;
         }
@@ -261,40 +267,49 @@ No bullet points, no markdown, no asterisks, no numbering.`;
       }
     }
 
-    throw lastError || new Error('ALL_FALLBACK_MODELS_FAILED: All fallback models failed.');
+    throw (
+      lastError ||
+      new Error("ALL_FALLBACK_MODELS_FAILED: All fallback models failed.")
+    );
   });
 }
-
 
 /**
  * Ensures proper honorifics are applied to sacred names.
  */
 function applyHonorifics(text, lang) {
-  if (lang === 'hi') {
-    text = text.replace(/(?<!श्री\s)(?<!परशु)(?<!अभि)(?<!बल)(?<!राम)राम(?!ायण|चंद्र|ानुज)/g, 'श्री राम');
-    text = text.replace(/श्री\s+श्री\s+राम/g, 'श्री राम');
+  if (lang === "hi") {
+    text = text.replace(
+      /(?<!श्री\s)(?<!परशु)(?<!अभि)(?<!बल)(?<!राम)राम(?!ायण|चंद्र|ानुज)/g,
+      "श्री राम",
+    );
+    text = text.replace(/श्री\s+श्री\s+राम/g, "श्री राम");
   } else {
-    text = text.replace(/(?<!Shree\s)(?<!Lord\s)(?<!Parashu)(?<!Bala)\bRama?\b(?!yana)/gi, () => 'Shree Ram');
-    text = text.replace(/Shree\s+Shree\s+Ram/gi, 'Shree Ram');
-    text = text.replace(/Lord\s+Shree\s+Shree\s+Ram/gi, 'Lord Shree Ram');
+    text = text.replace(
+      /(?<!Shree\s)(?<!Lord\s)(?<!Parashu)(?<!Bala)\bRama?\b(?!yana)/gi,
+      () => "Shree Ram",
+    );
+    text = text.replace(/Shree\s+Shree\s+Ram/gi, "Shree Ram");
+    text = text.replace(/Lord\s+Shree\s+Shree\s+Ram/gi, "Lord Shree Ram");
   }
   return text;
 }
 
 /**
- * Classifies the speaker of a shloka using Gemini.
- * Automatically rotates API key on quota exhaustion.
+ * Classifies the speaker of a shloka using the LLM.
  */
 async function classifySpeaker(sanskritText, englishTranslation, context = {}) {
   return limiter.schedule(async () => {
-    const models = ['gemini-3.1-flash-lite'];
+    const models = ["deepseek-v4-pro"];
     let lastError = null;
 
     for (const model of models) {
       try {
-        console.log(`[Gemini] Attempting speaker classification using model: ${model}`);
-        const content = await callGeminiWithRetry(async (apiKey) => {
-          const systemPrompt = `You are an expert scholar of the Valmiki Ramayana.
+        console.log(
+          `[LLM] Attempting speaker classification using model: ${model}`,
+        );
+
+        const systemPrompt = `You are an expert scholar of the Valmiki Ramayana.
 Analyze the given Sanskrit shloka and its English translation, and identify the primary character speaking these words.
 
 Follow this logic step-by-step to avoid classification errors:
@@ -341,66 +356,45 @@ Examples:
 
 Do not include any other text, quotes, punctuation, or markdown. Just this single string.`;
 
-          const { kanda, sarga, shloka_number } = context || {};
-          let contextSection = '';
-          if (kanda && sarga) {
-            const kDetails = KANDA_DETAILS[kanda] || { english: `Kanda ${kanda}`, hindi: `काण्ड ${kanda}`, description: '' };
-            contextSection = `Shloka Context:
+        const { kanda, sarga, shloka_number } = context || {};
+        let contextSection = "";
+        if (kanda && sarga) {
+          const kDetails = KANDA_DETAILS[kanda] || {
+            english: `Kanda ${kanda}`,
+            hindi: `काण्ड ${kanda}`,
+            description: "",
+          };
+          contextSection = `Shloka Context:
 - Kanda (Book): ${kDetails.english} (${kDetails.hindi}) - ${kDetails.description}
 - Sarga (Chapter): ${sarga}
-- Shloka Number: ${shloka_number || 'N/A'}
+- Shloka Number: ${shloka_number || "N/A"}
 (Important: Keep character timelines in mind. For example, Shree Hanuman does not meet Shree Ram until Kishkindha Kanda (Kanda 4). Therefore, Hanuman cannot be the speaker or be mentioned in Bala Kanda (1), Ayodhya Kanda (2), or Aranya Kanda (3). Likewise, check the active speakers of this sarga.)\n\n`;
-          }
+        }
 
-          const userPrompt = `${contextSection}Shloka:
+        const userPrompt = `${contextSection}Shloka:
 ${sanskritText}
 
 English Translation:
 ${englishTranslation}`;
 
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-          const payload = {
-            systemInstruction: {
-              parts: [{ text: systemPrompt }]
-            },
-            contents: [{
-              parts: [{ text: userPrompt }]
-            }],
-            generationConfig: {
-              temperature: 0.1,
-              maxOutputTokens: 30,
-            }
-          };
+        let content = await callLLM(model, systemPrompt, userPrompt, 0.1, 5000);
 
-          const response = await axios.post(url, payload, {
-            headers: { 'Content-Type': 'application/json' }
-          });
-
-          if (!response.data || !response.data.candidates || response.data.candidates.length === 0) {
-            throw new Error('Invalid response from Gemini API during classification');
-          }
-
-          let content = response.data.candidates[0].content?.parts?.[0]?.text;
-          if (!content) {
-            throw new Error('Empty content from Gemini API during classification');
-          }
-
-          return content.trim().replace(/['"‘“’]/g, '');
-        });
+        content = content.trim().replace(/['"'"'']/g, "");
 
         // Split and validate format
-        const parts = content.split(':');
+        const parts = content.split(":");
         if (parts.length === 3) {
-          const charEn = parts[0].trim().toLowerCase().replace(/\s+/g, '_');
+          const charEn = parts[0].trim().toLowerCase().replace(/\s+/g, "_");
           const charHi = parts[1].trim();
           const gender = parts[2].trim().toLowerCase();
           return `${charEn}:${charHi}:${gender}`;
         }
-        return 'other:अन्य:male';
-
+        return "other:अन्य:male";
       } catch (error) {
         if (isModelUnavailable(error)) {
-          console.warn(`[Gemini] ⚠️ Model ${model} unavailable (503) for classification. Falling back...`);
+          console.warn(
+            `[LLM] ⚠️ Model ${model} unavailable (503) for classification. Falling back...`,
+          );
           lastError = error;
           continue;
         }
@@ -408,7 +402,10 @@ ${englishTranslation}`;
       }
     }
 
-    throw lastError || new Error('ALL_FALLBACK_MODELS_FAILED for speaker classification.');
+    throw (
+      lastError ||
+      new Error("ALL_FALLBACK_MODELS_FAILED for speaker classification.")
+    );
   });
 }
 
