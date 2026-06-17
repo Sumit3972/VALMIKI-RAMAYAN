@@ -8,8 +8,8 @@ function getPool() {
     const connectionString = process.env.DATABASE_URL;
     pool = new Pool({
       connectionString: connectionString,
-      max: 1,
-      idleTimeoutMillis: 1000
+      max: 5,
+      idleTimeoutMillis: 10000
     });
 
     pool.on('error', (err) => {
