@@ -11,7 +11,7 @@ fastify.register(require("@fastify/cors"), {
 
 const db = require("../src/db");
 const { generateTTSChunk, chunkTextSafely } = require("../src/sarvam");
-const { generateTranslationPrep, generateAudioTranslationPrep, classifySpeaker } = require("../src/gemini");
+const { generateTranslationPrep, generateAudioTranslationPrep, generateAudioDetailsPrep, classifySpeaker } = require("../src/gemini");
 const { uploadAudioToR2 } = require("../src/r2");
 const { runConcurrent } = require("../src/taskQueue");
 const { getKeyStats: getSarvamKeyStats } = require("../src/keyManager");
@@ -191,35 +191,65 @@ async function getOrGenerateTranslation(shloka, lang) {
   }
 }
 
-// Helper to get or generate audio translation (short, direct explanation of shloka)
-async function getOrGenerateAudioTranslation(shloka, lang) {
-  if (lang === "hi") {
-    if (shloka.audio_translation_hi) return shloka.audio_translation_hi;
-    const newText = await generateAudioTranslationPrep(
-      shloka.sanskrit,
-      shloka.translation,
-      "hi",
-      shloka,
-    );
-    await db.query(
-      "UPDATE ramayana_shlokas SET audio_translation_hi = $1 WHERE id = $2",
-      [newText, shloka.id],
-    );
-    return newText;
-  } else {
-    if (shloka.audio_translation_en) return shloka.audio_translation_en;
-    const newText = await generateAudioTranslationPrep(
-      shloka.sanskrit,
-      shloka.translation,
-      "en",
-      shloka,
-    );
-    await db.query(
-      "UPDATE ramayana_shlokas SET audio_translation_en = $1 WHERE id = $2",
-      [newText, shloka.id],
-    );
-    return newText;
+// Helper to get or generate audio translation and speaker classification in a single LLM call
+async function getOrGenerateAudioDetails(shloka, lang) {
+  const targetLang = lang === "sanskrit" ? "hi" : lang; // If sanskrit, use Hindi to pre-cache translation
+  const translationColumn = targetLang === "hi" ? "audio_translation_hi" : "audio_translation_en";
+  
+  let speaker = shloka.speaker_character;
+  let translation = shloka[translationColumn];
+  
+  // If we already have the speaker (usually true after first classification) AND the translation, return cached
+  // Note: if the audio type is 'sanskrit', we only need speaker, so we check if speaker is already cached.
+  if (lang === "sanskrit" && speaker) {
+    return { speaker, translation: shloka.sanskrit };
   }
+  
+  if (speaker && translation) {
+    return { speaker, translation };
+  }
+  
+  // Call combined LLM function to get both details in one call
+  const result = await generateAudioDetailsPrep(
+    shloka.sanskrit,
+    shloka.translation,
+    targetLang,
+    shloka
+  );
+  
+  const { speaker: newSpeaker, translation: newTranslation } = result;
+  
+  const updates = [];
+  const params = [];
+  let paramIdx = 1;
+  
+  if (!speaker && newSpeaker) {
+    shloka.speaker_character = newSpeaker;
+    speaker = newSpeaker;
+    updates.push(`speaker_character = $${paramIdx++}`);
+    params.push(newSpeaker);
+  }
+  
+  if (!translation && newTranslation) {
+    shloka[translationColumn] = newTranslation;
+    translation = newTranslation;
+    updates.push(`${translationColumn} = $${paramIdx++}`);
+    params.push(newTranslation);
+  }
+  
+  if (updates.length > 0) {
+    params.push(shloka.id);
+    await db.query(
+      `UPDATE ramayana_shlokas SET ${updates.join(', ')} WHERE id = $${paramIdx}`,
+      params
+    );
+  }
+  
+  if (lang === "sanskrit") {
+    return { speaker, translation: shloka.sanskrit };
+  }
+  
+  return { speaker, translation };
 }
 
 // Helper to extract only the translation part from the structured Gemini string for TTS
@@ -455,18 +485,11 @@ fastify.post("/batch/audio", async (request, reply) => {
       };
     }
 
-    // Prepare text
-    let textToProcess = "";
-    let langCode = "";
-
-    if (type === "sanskrit") {
-      textToProcess = shloka.sanskrit;
-      langCode = "hi-IN";
-    } else {
-      const rawText = await getOrGenerateAudioTranslation(shloka, type);
-      textToProcess = extractTranslationText(rawText);
-      langCode = type === "hi" ? "hi-IN" : "en-IN";
-    }
+    // Get speaker and translation in a single operation
+    const details = await getOrGenerateAudioDetails(shloka, type);
+    const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
+    let textToProcess = details.translation;
+    let langCode = type === "en" ? "en-IN" : "hi-IN";
 
     // Get dynamic character speaker voice
     const voice = await getSpeakerVoiceForShloka(shloka);
@@ -586,19 +609,11 @@ fastify.post("/audio", async (request, reply) => {
         return { type, urls: parseUrls(shloka[columnName]) };
       }
 
-      // 3. Prepare Text
-      let textToProcess = "";
-      let langCode = "";
-
-      if (type === "sanskrit") {
-        textToProcess = shloka.sanskrit;
-        langCode = "hi-IN"; // Sanskrit uses Devanagari; hi-IN is the closest supported TTS language
-      } else {
-        // Ensure the TTS-prepped translation exists
-        const rawText = await getOrGenerateAudioTranslation(shloka, type);
-        textToProcess = extractTranslationText(rawText);
-        langCode = type === "hi" ? "hi-IN" : "en-IN";
-      }
+      // 3. Prepare Text and Speaker Character in a single operation
+      const details = await getOrGenerateAudioDetails(shloka, type);
+      const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
+      let textToProcess = details.translation;
+      let langCode = type === "en" ? "en-IN" : "hi-IN";
 
       // Get dynamic character speaker voice
       const voice = await getSpeakerVoiceForShloka(shloka);

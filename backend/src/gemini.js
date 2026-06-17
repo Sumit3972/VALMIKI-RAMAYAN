@@ -516,5 +516,147 @@ ${
   });
 }
 
-module.exports = { generateTranslationPrep, generateAudioTranslationPrep, classifySpeaker };
+/**
+ * Uses the LLM to generate both the speaker classification and the concise translation in a single call.
+ */
+async function generateAudioDetailsPrep(
+  sanskritText,
+  existingTranslation,
+  targetLanguage,
+  context = {},
+) {
+  return limiter.schedule(async () => {
+    const models = ["deepseek-v4-flash"];
+    let lastError = null;
+
+    for (const model of models) {
+      try {
+        console.log(`[LLM] Attempting combined audio details using model: ${model}`);
+
+        const systemPrompt = `You are an expert Sanskrit scholar specializing in the Valmiki Ramayana.
+Analyze the given Sanskrit shloka and its reference translation, and return two pieces of information:
+1. The character speaker classification.
+2. The direct, concise translation of the shloka in the target language.
+
+Follow these strict rules for each:
+
+--- PART 1: SPEAKER CLASSIFICATION ---
+Identify the primary character speaking these words.
+1. Narration vs Dialogue: If the shloka describes a scene or action in third-person, the speaker is the narrator 'valmiki'. Look for speech verbs in Sanskrit (e.g., 'उवाच' - uvāca, 'अब्रवीत्' - abravīt) to identify the speaker.
+2. Vocatives (addresses): If a character is addressed (e.g. "O Rama"), they are NOT the speaker.
+3. Check pronouns: First-person pronouns (I, me, my, we) refer to the speaker.
+4. Verify character timeline: Only classify speaker as a character present in the current Kanda's narrative (e.g., Shree Hanuman does not meet Shree Ram until Kishkindha Kanda, so he cannot speak in Bala, Ayodhya, or Aranya Kandas).
+5. Format: Return the speaker as 'english_snake_case:hindi_name:gender'.
+   Examples:
+   - sri_ram:श्री राम:male
+   - sita:सीता जी:female
+   - valmiki:वाल्मीकि:male
+   - lakshmana:लक्ष्मण जी:male
+
+--- PART 2: CONCISE TRANSLATION ---
+1. Don't explain too much. Only translate what the shloka says directly and faithfully.
+2. Do NOT add any extra context, commentary, explanation, philosophical insight, spiritual interpretation, or background details.
+3. Keep the translation simple, natural, concise, and reverent.
+4. Honorifics:
+   - Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
+   - Refer to "Sita" as "Mata Sita" or "Devi Sita".
+   - Refer to "Hanuman" as "Shree Hanuman".
+   - Refer to "Lakshmana" as "Shree Lakshman".
+   - Antagonists (e.g. Ravana) without honorifics.
+   - Sages: use "Maharishi", "Sage", "Rishi".
+5. Return only the direct translation text.
+
+--- OUTPUT STRUCTURE ---
+You MUST format your output exactly as follows:
+|||SPEAKER|||
+[english_snake_case:hindi_name:gender]
+|||TRANSLATION|||
+[Concise translation text]
+
+${
+  targetLanguage === "hi"
+    ? "IMPORTANT: You must write the translation in HINDI language. Use natural, simple, conversational Hindi."
+    : "Write the translation in English."
+}`;
+
+        const { kanda, sarga, shloka_number } = context || {};
+        let contextSection = "";
+        if (kanda && sarga) {
+          const kDetails = KANDA_DETAILS[kanda] || {
+            english: `Kanda ${kanda}`,
+            hindi: `Kanda ${kanda}`,
+            description: "",
+          };
+          contextSection = `Shloka context:
+- Kanda (Book): ${kDetails.english} - ${kDetails.description}
+- Sarga (Chapter): ${sarga}
+- Shloka Number: ${shloka_number || "N/A"}\n\n`;
+        }
+
+        let userPrompt = "";
+        if (targetLanguage === "hi") {
+          userPrompt = existingTranslation?.trim()
+            ? `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to Hindi. WRITE THE TRANSLATION ONLY IN HINDI.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to Hindi. WRITE THE TRANSLATION ONLY IN HINDI.\n\nShloka:\n${sanskritText}`;
+        } else {
+          userPrompt = existingTranslation?.trim()
+            ? `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}`;
+        }
+
+        let content = await callLLM(
+          model,
+          systemPrompt,
+          userPrompt,
+          0.3,
+          40000,
+        );
+
+        // Parse outputs
+        const speakerMatch = content.match(/\|\|\|SPEAKER\|\|\|([\s\S]*?)(?=\|\|\|TRANSLATION\|\|\||$)/);
+        const translationMatch = content.match(/\|\|\|TRANSLATION\|\|\|([\s\S]*)$/);
+
+        let speaker = speakerMatch ? speakerMatch[1].trim() : "valmiki:वाल्मीकि:male";
+        let translation = translationMatch ? translationMatch[1].trim() : "";
+
+        // Fallback checks
+        if (!speaker.includes(":")) {
+          speaker = "valmiki:वाल्मीकि:male";
+        }
+
+        // Clean up markdown artifacts in translation
+        translation = translation
+          .replace(/^\s*[\*\-•]\s*/gm, "")
+          .replace(/\*\*/g, "")
+          .replace(/\*/g, "")
+          .replace(/`/g, "")
+          .replace(/^#+\s*/gm, "")
+          .replace(/\[.*?\]\(.*?\)/g, "")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+
+        // Enforce honorifics
+        translation = applyHonorifics(translation, targetLanguage);
+
+        return { speaker, translation };
+      } catch (error) {
+        if (isModelUnavailable(error)) {
+          console.warn(
+            `[LLM] ⚠️ Model ${model} is unavailable (503) for audio details. Falling back...`,
+          );
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw (
+      lastError ||
+      new Error("ALL_FALLBACK_MODELS_FAILED: All fallback models failed for combined audio details.")
+    );
+  });
+}
+
+module.exports = { generateTranslationPrep, generateAudioTranslationPrep, generateAudioDetailsPrep, classifySpeaker };
 
