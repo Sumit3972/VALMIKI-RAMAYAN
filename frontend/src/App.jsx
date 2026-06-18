@@ -581,10 +581,10 @@ function App() {
     }
   }, [shlokas, shouldScrollToShloka]);
 
-  // Audio Prefetcher for the next 3 shlokas
+  // Audio Prefetcher for the next 7 shlokas
   const prefetchNextAudio = useCallback(
     (currentIndex, type) => {
-      const PREFETCH_COUNT = 3;
+      const PREFETCH_COUNT = 7;
       for (let offset = 1; offset <= PREFETCH_COUNT; offset++) {
         const nextShloka = shlokas?.[currentIndex + offset];
         if (!nextShloka) break;
@@ -617,6 +617,17 @@ function App() {
     [shlokas],
   );
 
+  // Helper: directly start playing audio via audioRef (bypasses state batching delays)
+  const playAudioDirect = useCallback((urls, index = 0) => {
+    if (audioRef.current && urls && urls.length > 0) {
+      audioRef.current.src = urls[index];
+      audioRef.current.play().catch((e) => {
+        console.error("Play error:", e);
+        setPlayingAudioId(null);
+      });
+    }
+  }, []);
+
   // Audio Player Logic
   const handlePlayAudio = async (shlokaId, type) => {
     if (audioRef.current) audioRef.current.pause();
@@ -630,12 +641,16 @@ function App() {
     const cacheKey = `${shlokaId}_${type}`;
     const currentIndex = shlokas.findIndex((s) => s.id === shlokaId);
 
-    // Cache hit
+    // Cache hit — play IMMEDIATELY, then prefetch in background
     if (audioCache.current[cacheKey]) {
-      setAudioUrls(audioCache.current[cacheKey]);
+      const urls = audioCache.current[cacheKey];
+      setAudioUrls(urls);
       setIsAudioLoading(false);
+      // Play directly without waiting for React re-render
+      playAudioDirect(urls, 0);
       if (currentIndex !== -1) {
-        prefetchNextAudio(currentIndex, type);
+        // Defer prefetch so it doesn't block current playback
+        setTimeout(() => prefetchNextAudio(currentIndex, type), 0);
         const currentShloka = shlokas[currentIndex];
         saveLocationToLocalStorage(
           kanda,
@@ -647,14 +662,18 @@ function App() {
       return;
     }
 
-    // Cache miss
+    // Cache miss — fetch, play IMMEDIATELY on response, then prefetch
     try {
       const data = await fetchAudioUrls(shlokaId, type);
       if (data.urls && data.urls.length > 0) {
         audioCache.current[cacheKey] = data.urls;
         setAudioUrls(data.urls);
+        setIsAudioLoading(false);
+        // Play directly without waiting for React re-render or prefetch completion
+        playAudioDirect(data.urls, 0);
         if (currentIndex !== -1) {
-          prefetchNextAudio(currentIndex, type);
+          // Defer prefetch so it doesn't compete with immediate playback
+          setTimeout(() => prefetchNextAudio(currentIndex, type), 0);
           const currentShloka = shlokas[currentIndex];
           saveLocationToLocalStorage(
             kanda,
@@ -666,12 +685,12 @@ function App() {
       } else {
         setPlayingAudioId(null);
         setAudioErrorId(shlokaId);
+        setIsAudioLoading(false);
       }
     } catch (err) {
       console.error("Audio generation failed", err);
       setPlayingAudioId(null);
       setAudioErrorId(shlokaId);
-    } finally {
       setIsAudioLoading(false);
     }
   };
@@ -681,15 +700,16 @@ function App() {
     setPlayingAudioId(null);
   };
 
+  // Only handles audio index changes (multi-segment audio within a shloka)
   useEffect(() => {
-    if (audioUrls.length > 0 && audioRef.current) {
+    if (audioUrls.length > 0 && currentAudioIndex > 0 && audioRef.current) {
       audioRef.current.src = audioUrls[currentAudioIndex];
       audioRef.current.play().catch((e) => {
         console.error("Play error:", e);
         setPlayingAudioId(null);
       });
     }
-  }, [audioUrls, currentAudioIndex]);
+  }, [currentAudioIndex]);
 
   const handleAudioEnded = () => {
     if (currentAudioIndex < audioUrls.length - 1) {
