@@ -596,14 +596,22 @@ function App() {
 
         audioPrefetchInFlight.current.add(key);
 
-        // Stagger audio requests by 300ms for fast parallel prefetch
+        // Stagger audio requests by 100ms for fast parallel prefetch
         setTimeout(async () => {
           try {
             const data = await fetchAudioUrls(nextShloka.id, type);
             if (data.urls && data.urls.length > 0) {
               audioCache.current[key] = data.urls;
+              // Preload actual audio files into browser cache for instant playback
+              data.urls.forEach((url) => {
+                const preloadAudio = new Audio();
+                preloadAudio.preload = "auto";
+                preloadAudio.src = url;
+                // Force the browser to start downloading
+                preloadAudio.load();
+              });
               console.log(
-                `[Audio Prefetch ✓] ${type.toUpperCase()} shloka ${nextShloka.id}`,
+                `[Audio Prefetch ✓] ${type.toUpperCase()} shloka ${nextShloka.id} (${data.urls.length} files preloaded)`,
               );
             }
           } catch {
