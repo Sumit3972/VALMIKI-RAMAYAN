@@ -611,7 +611,7 @@ function App() {
           } finally {
             audioPrefetchInFlight.current.delete(key);
           }
-        }, offset * 300);
+        }, offset * 100);
       }
     },
     [shlokas],
@@ -719,6 +719,8 @@ function App() {
       const currentIndex = shlokas.findIndex((s) => s.id === playingAudioId);
       if (currentIndex !== -1 && currentIndex < shlokas.length - 1) {
         const nextShloka = shlokas[currentIndex + 1];
+        // Clear stale in-flight entries so all 7 prefetch slots are available for the next shloka
+        audioPrefetchInFlight.current.clear();
         handlePlayAudio(nextShloka.id, currentAudioType);
       } else {
         setPlayingAudioId(null);

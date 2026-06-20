@@ -179,7 +179,7 @@ async function generateTranslationPrep(
   context = {},
 ) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-flash"];
+    const models = ["gpt-5.5"];
     let lastError = null;
 
     for (const model of models) {
@@ -313,9 +313,9 @@ function applyHonorifics(text, lang) {
 /**
  * Classifies the speaker of a shloka using the LLM.
  */
-async function classifySpeaker(sanskritText, englishTranslation, context = {}) {
+async function classifySpeaker(sanskritText, englishTranslation, context = {}, surroundingShlokas = []) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-flash"];
+    const models = ["gpt-5.5"];
     let lastError = null;
 
     for (const model of models) {
@@ -386,7 +386,27 @@ Do not include any other text, quotes, punctuation, or markdown. Just this singl
 (Important: Keep character timelines in mind. For example, Shree Hanuman does not meet Shree Ram until Kishkindha Kanda (Kanda 4). Therefore, Hanuman cannot be the speaker or be mentioned in Bala Kanda (1), Ayodhya Kanda (2), or Aranya Kanda (3). Likewise, check the active speakers of this sarga.)\n\n`;
         }
 
-        const userPrompt = `${contextSection}Shloka:
+        // Build surrounding shloka context for better speaker identification
+        let surroundingSection = "";
+        if (surroundingShlokas && surroundingShlokas.length > 0) {
+          const before = surroundingShlokas.filter(s => s.shloka_index < (context.shloka_index || 0));
+          const after = surroundingShlokas.filter(s => s.shloka_index > (context.shloka_index || 0));
+          
+          surroundingSection = `\n--- SURROUNDING CONTEXT (for reference only, do NOT classify these — classify ONLY the current shloka below) ---\n`;
+          
+          for (const s of before) {
+            surroundingSection += `[BEFORE] Shloka ${s.shloka_number || 'N/A'}:\n  Sanskrit: ${s.sanskrit}\n  Translation: ${s.translation || 'N/A'}\n\n`;
+          }
+          
+          surroundingSection += `>>> CURRENT SHLOKA TO CLASSIFY (below) <<<\n\n`;
+          
+          for (const s of after) {
+            surroundingSection += `[AFTER] Shloka ${s.shloka_number || 'N/A'}:\n  Sanskrit: ${s.sanskrit}\n  Translation: ${s.translation || 'N/A'}\n\n`;
+          }
+          surroundingSection += `--- END SURROUNDING CONTEXT ---\n\n`;
+        }
+
+        const userPrompt = `${contextSection}${surroundingSection}Shloka:
 ${sanskritText}
 
 English Translation:
@@ -434,7 +454,7 @@ async function generateAudioTranslationPrep(
   context = {},
 ) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-flash"];
+    const models = ["gpt-5.5"];
     let lastError = null;
 
     for (const model of models) {
@@ -539,9 +559,10 @@ async function generateAudioDetailsPrep(
   existingTranslation,
   targetLanguage,
   context = {},
+  surroundingShlokas = [],
 ) {
   return limiter.schedule(async () => {
-    const models = ["deepseek-v4-flash"];
+    const models = ["gpt-5.5"];
     let lastError = null;
 
     for (const model of models) {
@@ -608,15 +629,35 @@ ${
 - Shloka Number: ${shloka_number || "N/A"}\n\n`;
         }
 
+        // Build surrounding shloka context for better speaker identification
+        let surroundingSection = "";
+        if (surroundingShlokas && surroundingShlokas.length > 0) {
+          const before = surroundingShlokas.filter(s => s.shloka_index < (context.shloka_index || 0));
+          const after = surroundingShlokas.filter(s => s.shloka_index > (context.shloka_index || 0));
+          
+          surroundingSection = `\n--- SURROUNDING CONTEXT (for reference only, do NOT classify these — classify ONLY the current shloka below) ---\n`;
+          
+          for (const s of before) {
+            surroundingSection += `[BEFORE] Shloka ${s.shloka_number || 'N/A'}:\n  Sanskrit: ${s.sanskrit}\n  Translation: ${s.translation || 'N/A'}\n\n`;
+          }
+          
+          surroundingSection += `>>> CURRENT SHLOKA TO CLASSIFY (below) <<<\n\n`;
+          
+          for (const s of after) {
+            surroundingSection += `[AFTER] Shloka ${s.shloka_number || 'N/A'}:\n  Sanskrit: ${s.sanskrit}\n  Translation: ${s.translation || 'N/A'}\n\n`;
+          }
+          surroundingSection += `--- END SURROUNDING CONTEXT ---\n\n`;
+        }
+
         let userPrompt = "";
         if (targetLanguage === "hi") {
           userPrompt = existingTranslation?.trim()
-            ? `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to Hindi. WRITE THE TRANSLATION ONLY IN HINDI.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
-            : `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to Hindi. WRITE THE TRANSLATION ONLY IN HINDI.\n\nShloka:\n${sanskritText}`;
+            ? `${contextSection}${surroundingSection}Classify the speaker and translate this Valmiki Ramayana shloka to Hindi. WRITE THE TRANSLATION ONLY IN HINDI.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}${surroundingSection}Classify the speaker and translate this Valmiki Ramayana shloka to Hindi. WRITE THE TRANSLATION ONLY IN HINDI.\n\nShloka:\n${sanskritText}`;
         } else {
           userPrompt = existingTranslation?.trim()
-            ? `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
-            : `${contextSection}Classify the speaker and translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}`;
+            ? `${contextSection}${surroundingSection}Classify the speaker and translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}\n\nReference translation (use for accuracy):\n${existingTranslation}`
+            : `${contextSection}${surroundingSection}Classify the speaker and translate this Valmiki Ramayana shloka to English.\n\nShloka:\n${sanskritText}`;
         }
 
         let content = await callLLM(

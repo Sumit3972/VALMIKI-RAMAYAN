@@ -105,6 +105,25 @@ const SPEAKER_PREFIX_MAP = {
   guha: { en: "Guha said: ", hi: "गुहा बोले: " },
 };
 
+// Helper to fetch surrounding shlokas (3 before + 3 after) for speaker context
+async function fetchSurroundingShlokas(shloka) {
+  try {
+    const result = await db.query(
+      `SELECT id, sanskrit, translation, shloka_number, shloka_index
+       FROM ramayana_shlokas
+       WHERE kanda = $1 AND sarga = $2
+         AND shloka_index BETWEEN ($3 - 3) AND ($3 + 3)
+         AND id != $4
+       ORDER BY shloka_index ASC`,
+      [shloka.kanda, shloka.sarga, shloka.shloka_index, shloka.id]
+    );
+    return result.rows;
+  } catch (err) {
+    console.error('[fetchSurroundingShlokas] Error:', err.message);
+    return [];
+  }
+}
+
 // Helper to determine the correct voice ID for a shloka
 async function getSpeakerVoiceForShloka(shloka) {
   let speakerChar = shloka.speaker_character;
@@ -112,12 +131,15 @@ async function getSpeakerVoiceForShloka(shloka) {
   if (!speakerChar) {
     const MAX_RETRIES = 3;
     let attempt = 0;
+    // Fetch surrounding shlokas for context
+    const surrounding = await fetchSurroundingShlokas(shloka);
     while (attempt < MAX_RETRIES) {
       try {
         const classified = await classifySpeaker(
           shloka.sanskrit,
           shloka.translation,
           shloka,
+          surrounding,
         );
         if (classified) {
           await db.query(
@@ -214,7 +236,7 @@ async function getOrGenerateTranslation(shloka, lang) {
 }
 
 // Helper to get or generate audio translation and speaker classification in a single LLM call
-async function getOrGenerateAudioDetails(shloka, lang) {
+async function getOrGenerateAudioDetails(shloka, lang, surroundingShlokas = []) {
   const targetLang = lang === "sanskrit" ? "hi" : lang; // If sanskrit, use Hindi to pre-cache translation
   const translationColumn = targetLang === "hi" ? "audio_translation_hi" : "audio_translation_en";
   
@@ -236,7 +258,8 @@ async function getOrGenerateAudioDetails(shloka, lang) {
     shloka.sanskrit,
     shloka.translation,
     targetLang,
-    shloka
+    shloka,
+    surroundingShlokas
   );
   
   const { speaker: newSpeaker, translation: newTranslation } = result;
@@ -481,7 +504,8 @@ app.post("/batch/audio", async (c) => {
     }
 
     // Get speaker and translation in a single operation
-    const details = await getOrGenerateAudioDetails(shloka, type);
+    const surrounding = await fetchSurroundingShlokas(shloka);
+    const details = await getOrGenerateAudioDetails(shloka, type, surrounding);
     const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
     let textToProcess = details.translation;
     let langCode = type === "en" ? "en-IN" : "hi-IN";
@@ -603,7 +627,8 @@ app.post("/audio", async (c) => {
       }
 
       // 3. Prepare Text and Speaker Character in a single operation
-      const details = await getOrGenerateAudioDetails(shloka, type);
+      const surrounding = await fetchSurroundingShlokas(shloka);
+      const details = await getOrGenerateAudioDetails(shloka, type, surrounding);
       const speakerChar = details.speaker || "valmiki:वाल्मीकि:male";
       let textToProcess = details.translation;
       let langCode = type === "en" ? "en-IN" : "hi-IN";
