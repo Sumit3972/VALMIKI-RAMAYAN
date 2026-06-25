@@ -19,8 +19,18 @@ import {
   Headphones,
   Search,
   Sparkles,
+  Share2,
+  Download,
+  Bookmark,
+  BookmarkCheck,
+  ListMusic,
+  SkipForward,
+  SkipBack,
+  X,
+  Star,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import html2canvas from "html2canvas";
 
 // ── Kanda Name Mapping ──────────────────────────────────────────────
 const KANDA_NAMES = {
@@ -42,6 +52,87 @@ function getKandaHindi(kandaNum) {
   return KANDA_NAMES[kandaNum]?.hindi || "";
 }
 
+// ── Bookmark Utilities ──────────────────────────────────────────────
+function getBookmarks() {
+  try {
+    return JSON.parse(localStorage.getItem("valmiki_bookmarks") || "[]");
+  } catch { return []; }
+}
+
+function toggleBookmark(shloka, kanda, sarga) {
+  const bookmarks = getBookmarks();
+  const idx = bookmarks.findIndex((b) => b.id === shloka.id);
+  if (idx !== -1) {
+    bookmarks.splice(idx, 1);
+  } else {
+    bookmarks.push({
+      id: shloka.id,
+      kanda,
+      sarga,
+      shloka_number: shloka.shloka_number,
+      sanskrit: shloka.sanskrit,
+      timestamp: Date.now(),
+    });
+  }
+  localStorage.setItem("valmiki_bookmarks", JSON.stringify(bookmarks));
+  return bookmarks;
+}
+
+function isBookmarked(shlokaId) {
+  return getBookmarks().some((b) => b.id === shlokaId);
+}
+
+// ── Daily Shloka Utility ────────────────────────────────────────────
+function getDailyShloka(shlokas, kanda, sarga) {
+  if (!shlokas || shlokas.length === 0) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  const saved = localStorage.getItem("valmiki_daily_shloka");
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (parsed.date === today && parsed.kanda === kanda && parsed.sarga === sarga && parsed.shloka) return parsed.shloka;
+    } catch {
+      localStorage.removeItem("valmiki_daily_shloka");
+    }
+  }
+  // Pick based on day-of-year for deterministic selection
+  const start = new Date(new Date().getFullYear(), 0, 0);
+  const diff = new Date() - start;
+  const dayOfYear = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const index = dayOfYear % shlokas.length;
+  const picked = shlokas[index];
+  localStorage.setItem("valmiki_daily_shloka", JSON.stringify({ date: today, kanda, sarga, shloka: picked }));
+  return picked;
+}
+
+// ── Progress Tracking ───────────────────────────────────────────────
+function getReadProgress() {
+  try {
+    return JSON.parse(localStorage.getItem("valmiki_read_progress") || "{}");
+  } catch { return {}; }
+}
+
+function markSargaRead(kanda, sarga) {
+  const progress = getReadProgress();
+  const key = `${kanda}_${sarga}`;
+  progress[key] = true;
+  localStorage.setItem("valmiki_read_progress", JSON.stringify(progress));
+  return progress;
+}
+
+function isSargaRead(kanda, sarga) {
+  return !!getReadProgress()[`${kanda}_${sarga}`];
+}
+
+function getKandaProgress(kanda, totalSargas) {
+  const progress = getReadProgress();
+  let read = 0;
+  for (let s = 1; s <= totalSargas; s++) {
+    if (progress[`${kanda}_${s}`]) read++;
+  }
+  return Math.round((read / totalSargas) * 100);
+}
+
 // ── Shloka Card ─────────────────────────────────────────────────────
 function ShlokaCard({
   shloka,
@@ -55,6 +146,9 @@ function ShlokaCard({
   onStopAudio,
   currentAudioType,
   onActiveShloka,
+  bookmarked,
+  onToggleBookmark,
+  onShareCard,
 }) {
   const [showTranslation, setShowTranslation] = useState(false);
   const [targetLang, setTargetLang] = useState("en");
@@ -214,7 +308,7 @@ function ShlokaCard({
 
       {/* Card body */}
       <div className="p-4 sm:p-5 md:p-6">
-        {/* Header: Shloka number + Audio Controls */}
+        {/* Header: Shloka number + Actions */}
         <div className="flex items-center justify-between mb-4 gap-3">
           {/* Shloka badge */}
           <div className="flex items-center gap-2">
@@ -233,8 +327,32 @@ function ShlokaCard({
             </div>
           </div>
 
-          {/* Audio Controls */}
+          {/* Actions + Audio Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              onClick={() => onToggleBookmark(shloka)}
+              className={`w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg transition-all duration-200 ${
+                bookmarked
+                  ? "bg-primary/20 text-primary border border-primary/30"
+                  : "bg-surfaceHighlight border border-white/10 text-textMuted hover:text-primary hover:border-primary/30"
+              }`}
+              title={bookmarked ? "Remove bookmark" : "Bookmark shloka"}
+            >
+              {bookmarked ? (
+                <BookmarkCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              ) : (
+                <Bookmark className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              )}
+            </button>
+
+            <button
+              onClick={() => onShareCard(shloka)}
+              className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg bg-surfaceHighlight border border-white/10 text-textMuted hover:text-primary hover:border-primary/30 transition-all duration-200"
+              title="Create share card"
+            >
+              <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
+
             {/* Audio type tabs */}
             <div className="flex bg-surfaceHighlight/60 rounded-lg p-0.5 border border-white/5">
               {["sanskrit", "hi", "en"].map((type) => (
@@ -455,6 +573,14 @@ function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState(null);
 
+  // Feature state: playback, sharing, bookmarks, progress
+  const [sargaPlayback, setSargaPlayback] = useState(false);
+  const [bookmarks, setBookmarks] = useState(() => getBookmarks());
+  const [readProgress, setReadProgress] = useState(() => getReadProgress());
+  const [dailyShloka, setDailyShloka] = useState(null);
+  const [shareCardShloka, setShareCardShloka] = useState(null);
+  const shareCardRef = useRef(null);
+
   const handleSearchSubmit = async (e) => {
     if (e) e.preventDefault();
     if (searchQuery.trim().length < 2) return;
@@ -537,7 +663,10 @@ function App() {
       setIsLoading(true);
       try {
         const data = await fetchShlokas(kanda, sarga);
-        setShlokas(data.shlokas || []);
+        const loadedShlokas = data.shlokas || [];
+        setShlokas(loadedShlokas);
+        setDailyShloka(getDailyShloka(loadedShlokas, kanda, sarga));
+        setSargaPlayback(false);
         // Clear translation & audio cache and in-flight trackers when sarga changes
         translationCache.current = {};
         prefetchInFlight.current.clear();
@@ -706,6 +835,51 @@ function App() {
   const handleStopAudio = () => {
     if (audioRef.current) audioRef.current.pause();
     setPlayingAudioId(null);
+    setSargaPlayback(false);
+  };
+
+  const startSargaPlayback = (startId = null) => {
+    const startShloka = startId
+      ? shlokas.find((item) => item.id === startId)
+      : shlokas[0];
+    if (!startShloka) return;
+    setSargaPlayback(true);
+    handlePlayAudio(startShloka.id, currentAudioType || "sanskrit");
+  };
+
+  const stopSargaPlayback = () => {
+    setSargaPlayback(false);
+    handleStopAudio();
+  };
+
+  const playAdjacentShloka = (direction) => {
+    const currentIndex = shlokas.findIndex((s) => s.id === playingAudioId);
+    const nextIndex = Math.max(0, Math.min(shlokas.length - 1, currentIndex + direction));
+    const nextShloka = shlokas[nextIndex];
+    if (nextShloka) handlePlayAudio(nextShloka.id, currentAudioType || "sanskrit");
+  };
+
+  const handleToggleBookmark = (shloka) => {
+    const updated = toggleBookmark(shloka, kanda, sarga);
+    setBookmarks(updated);
+  };
+
+  const handleMarkSargaRead = () => {
+    const updated = markSargaRead(kanda, sarga);
+    setReadProgress(updated);
+  };
+
+  const handleDownloadShareCard = async () => {
+    if (!shareCardRef.current || !shareCardShloka) return;
+    const canvas = await html2canvas(shareCardRef.current, {
+      backgroundColor: null,
+      scale: 2,
+      useCORS: true,
+    });
+    const link = document.createElement("a");
+    link.download = `valmiki-ramayana-${shareCardShloka.shloka_number || "shloka"}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
   };
 
   // Only handles audio index changes (multi-segment audio within a shloka)
@@ -723,22 +897,29 @@ function App() {
     if (currentAudioIndex < audioUrls.length - 1) {
       setCurrentAudioIndex((prev) => prev + 1);
     } else {
-      // Current shloka audio finished: Auto play next shloka's audio if available
+      // Current shloka audio finished: continue only in Sarga Playback mode
       const currentIndex = shlokas.findIndex((s) => s.id === playingAudioId);
-      if (currentIndex !== -1 && currentIndex < shlokas.length - 1) {
+      if (sargaPlayback && currentIndex !== -1 && currentIndex < shlokas.length - 1) {
         const nextShloka = shlokas[currentIndex + 1];
-        // Clear stale in-flight entries so all 7 prefetch slots are available for the next shloka
+        const element = document.getElementById(`shloka-card-${nextShloka.id}`);
+        element?.scrollIntoView({ behavior: "smooth", block: "center" });
         audioPrefetchInFlight.current.clear();
         handlePlayAudio(nextShloka.id, currentAudioType);
       } else {
         setPlayingAudioId(null);
         setCurrentAudioIndex(0);
+        setSargaPlayback(false);
       }
     }
   };
 
   const currentKandaMeta = metadata.find((m) => m.kanda === kanda);
   const availableSargas = currentKandaMeta ? currentKandaMeta.sargas : [];
+  const currentProgress = currentKandaMeta
+    ? getKandaProgress(kanda, currentKandaMeta.sargas.length)
+    : 0;
+  const currentShlokaIndex = shlokas.findIndex((s) => s.id === playingAudioId);
+  const currentShloka = currentShlokaIndex !== -1 ? shlokas[currentShlokaIndex] : null;
 
   return (
     <div className="h-screen flex flex-col bg-gradient-sacred overflow-hidden">
@@ -887,6 +1068,35 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-2 text-textMuted">
+              <button
+                onClick={sargaPlayback ? stopSargaPlayback : () => startSargaPlayback()}
+                disabled={isLoading || shlokas.length === 0 || isAudioLoading}
+                className={`hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-md border text-[11px] font-bold transition-all ${
+                  sargaPlayback
+                    ? "bg-primary text-background border-primary"
+                    : "bg-surfaceHighlight/60 border-white/5 text-textSecondary hover:text-primary hover:border-primary/30"
+                } disabled:opacity-40`}
+              >
+                <ListMusic className="w-3.5 h-3.5" />
+                {sargaPlayback ? "Stop Sarga" : "Play Sarga"}
+              </button>
+              <button
+                onClick={handleMarkSargaRead}
+                className={`hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-md border text-[11px] font-bold transition-all ${
+                  isSargaRead(kanda, sarga)
+                    ? "bg-primary/15 border-primary/25 text-primary"
+                    : "bg-surfaceHighlight/60 border-white/5 text-textSecondary hover:text-primary hover:border-primary/30"
+                }`}
+              >
+                <Star className="w-3.5 h-3.5" />
+                {isSargaRead(kanda, sarga) ? "Read" : "Mark Read"}
+              </button>
+              <div className="hidden sm:block w-24">
+                <div className="h-1.5 rounded-full bg-surfaceHighlight overflow-hidden border border-white/5">
+                  <div className="h-full bg-primary" style={{ width: `${currentProgress}%` }} />
+                </div>
+                <p className="text-[9px] mt-1 text-right">{currentProgress}% read</p>
+              </div>
               <span className="text-[11px] sm:text-xs font-medium bg-surfaceHighlight/60 px-2.5 py-1 rounded-md border border-white/5">
                 {shlokas.length} श्लोक
               </span>
@@ -919,6 +1129,60 @@ function App() {
               </div>
             ) : (
               <div className="space-y-3 sm:space-y-4">
+                {dailyShloka && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="glass-panel rounded-2xl p-4 border border-primary/20 bg-primary/5"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-primary text-[10px] uppercase tracking-widest font-bold mb-2">
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Daily Shloka
+                        </div>
+                        <p className="text-base sm:text-lg font-sanskrit text-textMain leading-relaxed line-clamp-3">
+                          {dailyShloka.sanskrit}
+                        </p>
+                        <p className="text-[11px] text-textMuted mt-2">
+                          {getKandaLabel(kanda)} — Sarga {sarga} — Shloka {dailyShloka.shloka_number}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShouldScrollToShloka(dailyShloka.id);
+                          saveLocationToLocalStorage(kanda, sarga, dailyShloka.id, dailyShloka.shloka_number);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-primary text-background text-xs font-bold btn-pill whitespace-nowrap"
+                      >
+                        Open
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+
+                <div className="sm:hidden grid grid-cols-2 gap-2">
+                  <button
+                    onClick={sargaPlayback ? stopSargaPlayback : () => startSargaPlayback()}
+                    disabled={isLoading || shlokas.length === 0 || isAudioLoading}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all ${
+                      sargaPlayback
+                        ? "bg-primary text-background border-primary"
+                        : "bg-surfaceHighlight/60 border-white/5 text-textSecondary"
+                    } disabled:opacity-40`}
+                  >
+                    <ListMusic className="w-4 h-4" />
+                    {sargaPlayback ? "Stop" : "Play Sarga"}
+                  </button>
+                  <button
+                    onClick={handleMarkSargaRead}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-surfaceHighlight/60 border border-white/5 text-textSecondary text-xs font-bold"
+                  >
+                    <Star className="w-4 h-4" />
+                    {isSargaRead(kanda, sarga) ? "Read" : "Mark Read"}
+                  </button>
+                </div>
+
                 {shlokas.map((shloka, i) => (
                   <ShlokaCard
                     key={shloka.id}
@@ -938,6 +1202,9 @@ function App() {
                     onActiveShloka={(id, num) =>
                       saveLocationToLocalStorage(kanda, sarga, id, num)
                     }
+                    bookmarked={bookmarks.some((b) => b.id === shloka.id)}
+                    onToggleBookmark={handleToggleBookmark}
+                    onShareCard={setShareCardShloka}
                   />
                 ))}
               </div>
@@ -945,6 +1212,54 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* ── Sarga Playback Mini Player ── */}
+      <AnimatePresence>
+        {currentShloka && (
+          <motion.div
+            initial={{ opacity: 0, y: 80 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 80 }}
+            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[94%] max-w-2xl"
+          >
+            <div className="glass-panel rounded-2xl p-3 sm:p-4 border border-primary/25 shadow-2xl shadow-primary/10">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-primary text-[10px] uppercase tracking-widest font-bold mb-1">
+                    <Volume2 className="w-3.5 h-3.5" />
+                    {sargaPlayback ? "Sarga Playback" : "Now Playing"}
+                  </div>
+                  <p className="text-xs sm:text-sm text-textSecondary truncate">
+                    Shloka {currentShloka.shloka_number} · {currentShlokaIndex + 1}/{shlokas.length}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => playAdjacentShloka(-1)}
+                    disabled={currentShlokaIndex <= 0 || isAudioLoading}
+                    className="w-8 h-8 rounded-lg bg-surfaceHighlight border border-white/10 text-textMuted hover:text-primary disabled:opacity-40 flex items-center justify-center"
+                  >
+                    <SkipBack className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handleStopAudio}
+                    className="w-9 h-9 rounded-lg bg-primary text-background shadow-lg shadow-primary/20 flex items-center justify-center"
+                  >
+                    <Pause className="w-4 h-4 fill-current" />
+                  </button>
+                  <button
+                    onClick={() => playAdjacentShloka(1)}
+                    disabled={currentShlokaIndex >= shlokas.length - 1 || isAudioLoading}
+                    className="w-8 h-8 rounded-lg bg-surfaceHighlight border border-white/10 text-textMuted hover:text-primary disabled:opacity-40 flex items-center justify-center"
+                  >
+                    <SkipForward className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Beautiful Resume Floating Banner ── */}
       <AnimatePresence>
@@ -997,6 +1312,63 @@ function App() {
                 </button>
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Share Card Modal ── */}
+      <AnimatePresence>
+        {shareCardShloka && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] bg-background/85 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-lg"
+            >
+              <div className="flex justify-end mb-3 gap-2">
+                <button
+                  onClick={handleDownloadShareCard}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-background rounded-xl text-xs font-bold shadow-lg shadow-primary/20 btn-pill"
+                >
+                  <Download className="w-4 h-4" />
+                  Download PNG
+                </button>
+                <button
+                  onClick={() => setShareCardShloka(null)}
+                  className="w-9 h-9 rounded-xl bg-surfaceHighlight border border-white/10 text-textMuted hover:text-textSecondary flex items-center justify-center"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div
+                ref={shareCardRef}
+                className="rounded-[28px] overflow-hidden p-8 sm:p-10 bg-[#120b05] border border-[#f59e0b55] shadow-2xl"
+                style={{ backgroundImage: "radial-gradient(circle at top, rgba(245,158,11,0.22), transparent 45%), linear-gradient(135deg, #1c1208, #060403)" }}
+              >
+                <div className="text-center border border-[#f59e0b44] rounded-3xl p-6 sm:p-8 bg-black/20">
+                  <p className="text-[#f59e0b] text-xs uppercase tracking-[0.35em] font-bold mb-4">
+                    Valmiki Ramayana
+                  </p>
+                  <p className="text-[#fff7ed] font-sanskrit text-2xl sm:text-3xl leading-loose mb-6">
+                    {shareCardShloka.sanskrit}
+                  </p>
+                  <div className="h-px bg-gradient-to-r from-transparent via-[#f59e0b99] to-transparent mb-5" />
+                  <p className="text-[#d6d3d1] text-sm sm:text-base font-serif leading-relaxed mb-5">
+                    {shareCardShloka.translation || shareCardShloka.english || "A sacred verse from the Valmiki Ramayana."}
+                  </p>
+                  <p className="text-[#fbbf24] text-xs font-bold tracking-widest">
+                    {getKandaLabel(kanda)} · Sarga {sarga} · Shloka {shareCardShloka.shloka_number}
+                  </p>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
