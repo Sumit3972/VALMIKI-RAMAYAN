@@ -996,6 +996,7 @@ function App() {
 
         // Seamless transition: use cached audio if available, otherwise fetch
         const nextCacheKey = `${nextShloka.id}_${currentAudioType}`;
+        const nextIndex = currentIndex + 1;
         if (audioCache.current[nextCacheKey]) {
           // Instant seamless transition using cached audio
           const nextUrls = audioCache.current[nextCacheKey];
@@ -1005,9 +1006,16 @@ function App() {
           setIsAudioLoading(false);
           // Play immediately using preloaded elements
           playAudioDirect(nextUrls, 0, nextShloka.id, currentAudioType);
+          saveLocationToLocalStorage(
+            kanda,
+            sarga,
+            nextShloka.id,
+            nextShloka.shloka_number,
+          );
+          // Sliding window: prefetch next 7 from the shloka we just moved to
+          setTimeout(() => prefetchNextAudio(nextIndex, currentAudioType), 0);
         } else {
-          // Fallback to normal playback if not cached
-          audioPrefetchInFlight.current.clear();
+          // Fallback — handlePlayAudio also prefetches next 7 from nextIndex
           handlePlayAudio(nextShloka.id, currentAudioType);
         }
       } else {
