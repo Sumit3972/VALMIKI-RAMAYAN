@@ -537,6 +537,9 @@ function App() {
   const [audioUrls, setAudioUrls] = useState([]);
   const [currentAudioIndex, setCurrentAudioIndex] = useState(0);
   const audioRef = useRef(null);
+  // Always-latest ref to handleAudioEnded so cloned preloaded Audio elements
+  // invoke the current handler (with fresh state) instead of a stale closure.
+  const handleAudioEndedRef = useRef(null);
   // Shared translation cache: key = `${shlokaId}_${lang}`, value = parsed translation object
   const translationCache = useRef({});
   // Tracks in-flight prefetch keys to prevent duplicate concurrent requests
@@ -773,7 +776,9 @@ function App() {
 
         // Clone the preloaded audio for immediate playback
         const audioClone = preloadedAudio.cloneNode();
-        audioClone.onended = handleAudioEnded;
+        // Use the ref so the clone calls the latest handler (with fresh state)
+        // instead of the stale closure captured by this stable useCallback.
+        audioClone.onended = () => handleAudioEndedRef.current();
 
         // Replace the current audio element
         if (audioRef.current) {
@@ -792,13 +797,12 @@ function App() {
     // Fallback to regular audio element
     if (audioRef.current && urls && urls.length > 0) {
       audioRef.current.src = urls[index];
-      audioRef.current.onended = handleAudioEnded;
       audioRef.current.play().catch((e) => {
         console.error("Play error:", e);
         setPlayingAudioId(null);
       });
     }
-  }, [handleAudioEnded]);
+  }, []);
 
   // Audio Player Logic
   const handlePlayAudio = async (shlokaId, type) => {
@@ -1013,6 +1017,10 @@ function App() {
       }
     }
   };
+
+  // Keep the ref in sync with the latest handler so cloned Audio elements
+  // (created by the stable playAudioDirect callback) always call the current one.
+  handleAudioEndedRef.current = handleAudioEnded;
 
   const currentKandaMeta = metadata.find((m) => m.kanda === kanda);
   const availableSargas = currentKandaMeta ? currentKandaMeta.sargas : [];
