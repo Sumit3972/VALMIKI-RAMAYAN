@@ -792,12 +792,13 @@ function App() {
     // Fallback to regular audio element
     if (audioRef.current && urls && urls.length > 0) {
       audioRef.current.src = urls[index];
+      audioRef.current.onended = handleAudioEnded;
       audioRef.current.play().catch((e) => {
         console.error("Play error:", e);
         setPlayingAudioId(null);
       });
     }
-  }, []);
+  }, [handleAudioEnded]);
 
   // Audio Player Logic
   const handlePlayAudio = async (shlokaId, type) => {
@@ -905,15 +906,66 @@ function App() {
 
   const handleDownloadShareCard = async () => {
     if (!shareCardRef.current || !shareCardShloka) return;
-    const canvas = await html2canvas(shareCardRef.current, {
-      backgroundColor: null,
-      scale: 2,
-      useCORS: true,
-    });
-    const link = document.createElement("a");
-    link.download = `valmiki-ramayana-${shareCardShloka.shloka_number || "shloka"}.png`;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
+
+    try {
+      const canvas = await html2canvas(shareCardRef.current, {
+        backgroundColor: "#0a0908",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        width: shareCardRef.current.offsetWidth,
+        height: shareCardRef.current.offsetHeight,
+      });
+
+      const link = document.createElement("a");
+      link.download = `valmiki-ramayana-${shareCardShloka.shloka_number || "shloka"}.png`;
+      link.href = canvas.toDataURL("image/png");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error("Download failed:", error);
+      // Fallback: try with simpler approach
+      try {
+        const canvas = await html2canvas(shareCardRef.current, {
+          backgroundColor: "#120b05",
+          scale: 1,
+        });
+        const link = document.createElement("a");
+        link.download = `valmiki-ramayana-${shareCardShloka.shloka_number || "shloka"}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      } catch (fallbackError) {
+        console.error("Fallback download also failed:", fallbackError);
+      }
+    }
+  };
+
+  const handleShareCard = async () => {
+    if (!shareCardShloka) return;
+
+    const shareText = `${shareCardShloka.sanskrit}\n\n— ${getKandaLabel(kanda)} · Sarga ${sarga} · Shloka ${shareCardShloka.shloka_number}\n\nValmiki Ramayana`;
+
+    // Try Web Share API first (mobile-friendly)
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Valmiki Ramayana",
+          text: shareText,
+        });
+        return;
+      } catch (error) {
+        // User cancelled or share failed, continue to clipboard fallback
+      }
+    }
+
+    // Fallback to clipboard
+    try {
+      await navigator.clipboard.writeText(shareText);
+      // Visual feedback could be added here
+    } catch (error) {
+      console.error("Share failed:", error);
+    }
   };
 
   // Only handles audio index changes (multi-segment audio within a shloka)
@@ -931,9 +983,9 @@ function App() {
     if (currentAudioIndex < audioUrls.length - 1) {
       setCurrentAudioIndex((prev) => prev + 1);
     } else {
-      // Current shloka audio finished: continue only in Sarga Playback mode
+      // Current shloka audio finished: continue to next shloka automatically
       const currentIndex = shlokas.findIndex((s) => s.id === playingAudioId);
-      if (sargaPlayback && currentIndex !== -1 && currentIndex < shlokas.length - 1) {
+      if (currentIndex !== -1 && currentIndex < shlokas.length - 1) {
         const nextShloka = shlokas[currentIndex + 1];
         const element = document.getElementById(`shloka-card-${nextShloka.id}`);
         element?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1013,6 +1065,9 @@ function App() {
                   <option value="saffron">Saffron</option>
                   <option value="dandaka">Dandaka</option>
                   <option value="setu">Setu</option>
+                  <option value="ayodhya">Ayodhya</option>
+                  <option value="himalaya">Himalaya</option>
+                  <option value="dawn">Dawn</option>
                 </select>
               </div>
             </div>
@@ -1042,6 +1097,9 @@ function App() {
                   <option value="saffron">Saffron</option>
                   <option value="dandaka">Dandaka</option>
                   <option value="setu">Setu</option>
+                  <option value="ayodhya">Ayodhya</option>
+                  <option value="himalaya">Himalaya</option>
+                  <option value="dawn">Dawn</option>
                 </select>
               </div>
 
@@ -1381,6 +1439,13 @@ function App() {
               className="w-full max-w-lg"
             >
               <div className="flex justify-end mb-3 gap-2">
+                <button
+                  onClick={handleShareCard}
+                  className="flex items-center gap-2 px-4 py-2 bg-surfaceHighlight border border-white/10 text-textMuted hover:text-textSecondary rounded-xl text-xs font-bold transition-all"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Share
+                </button>
                 <button
                   onClick={handleDownloadShareCard}
                   className="flex items-center gap-2 px-4 py-2 bg-primary text-background rounded-xl text-xs font-bold shadow-lg shadow-primary/20 btn-pill"
