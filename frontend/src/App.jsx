@@ -763,6 +763,14 @@ function App() {
     [shlokas],
   );
 
+  const schedulePrefetchAheadAfterPlay = useCallback(
+    (currentIndex, type) => {
+      if (currentIndex < 0) return;
+      setTimeout(() => prefetchNextAudio(currentIndex, type), 0);
+    },
+    [prefetchNextAudio],
+  );
+
   // Enhanced direct audio playback using preloaded elements when available
   const playAudioDirect = useCallback((urls, index = 0, shlokaId = null, type = null) => {
     if (!urls || urls.length === 0) return;
@@ -825,8 +833,7 @@ function App() {
       // Play directly using preloaded elements when available
       playAudioDirect(urls, 0, shlokaId, type);
       if (currentIndex !== -1) {
-        // Defer prefetch so it doesn't block current playback
-        setTimeout(() => prefetchNextAudio(currentIndex, type), 0);
+        schedulePrefetchAheadAfterPlay(currentIndex, type);
         const currentShloka = shlokas[currentIndex];
         saveLocationToLocalStorage(
           kanda,
@@ -1012,10 +1019,10 @@ function App() {
             nextShloka.id,
             nextShloka.shloka_number,
           );
-          // Sliding window: prefetch next 7 from the shloka we just moved to
-          setTimeout(() => prefetchNextAudio(nextIndex, currentAudioType), 0);
+          // Same sliding window as a manual play: on shloka 2, prefetch 3–9 (adds 9 after 8)
+          schedulePrefetchAheadAfterPlay(nextIndex, currentAudioType);
         } else {
-          // Fallback — handlePlayAudio also prefetches next 7 from nextIndex
+          // handlePlayAudio prefetches next 7 ahead of nextIndex when fetch finishes
           handlePlayAudio(nextShloka.id, currentAudioType);
         }
       } else {
