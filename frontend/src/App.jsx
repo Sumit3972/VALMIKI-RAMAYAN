@@ -710,7 +710,7 @@ function App() {
     }
   }, [shlokas, shouldScrollToShloka]);
 
-  // Audio Prefetcher for the next 7 shlokas
+  // Enhanced audio prefetcher with pre-created Audio elements for seamless playback
   const prefetchNextAudio = useCallback(
     (currentIndex, type) => {
       const PREFETCH_COUNT = 7;
@@ -725,20 +725,26 @@ function App() {
 
         audioPrefetchInFlight.current.add(key);
 
-        // Stagger audio requests by 100ms for fast parallel prefetch
+        // Stagger audio requests by 50ms for fast parallel prefetch
         setTimeout(async () => {
           try {
             const data = await fetchAudioUrls(nextShloka.id, type);
             if (data.urls && data.urls.length > 0) {
               audioCache.current[key] = data.urls;
-              // Preload actual audio files into browser cache for instant playback
-              data.urls.forEach((url) => {
-                const preloadAudio = new Audio();
-                preloadAudio.preload = "auto";
-                preloadAudio.src = url;
-                // Force the browser to start downloading
-                preloadAudio.load();
+
+              // Create and preload Audio elements for instant seamless playback
+              const preloadedAudios = data.urls.map((url) => {
+                const audio = new Audio();
+                audio.preload = "auto";
+                audio.src = url;
+                // Force browser to start downloading immediately
+                audio.load();
+                return audio;
               });
+
+              // Store preloaded Audio elements for seamless playback
+              audioCache.current[`${key}_elements`] = preloadedAudios;
+
               console.log(
                 `[Audio Prefetch ✓] ${type.toUpperCase()} shloka ${nextShloka.id} (${data.urls.length} files preloaded)`,
               );
@@ -748,14 +754,42 @@ function App() {
           } finally {
             audioPrefetchInFlight.current.delete(key);
           }
-        }, offset * 100);
+        }, offset * 50);
       }
     },
     [shlokas],
   );
 
-  // Helper: directly start playing audio via audioRef (bypasses state batching delays)
-  const playAudioDirect = useCallback((urls, index = 0) => {
+  // Enhanced direct audio playback using preloaded elements when available
+  const playAudioDirect = useCallback((urls, index = 0, shlokaId = null, type = null) => {
+    if (!urls || urls.length === 0) return;
+
+    // Try to use preloaded Audio element for seamless playback
+    if (shlokaId && type) {
+      const cacheKey = `${shlokaId}_${type}_elements`;
+      const preloadedAudios = audioCache.current[cacheKey];
+      if (preloadedAudios && preloadedAudios[index]) {
+        const preloadedAudio = preloadedAudios[index];
+
+        // Clone the preloaded audio for immediate playback
+        const audioClone = preloadedAudio.cloneNode();
+        audioClone.onended = handleAudioEnded;
+
+        // Replace the current audio element
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        audioRef.current = audioClone;
+
+        audioClone.play().catch((e) => {
+          console.error("Preloaded play error:", e);
+          setPlayingAudioId(null);
+        });
+        return;
+      }
+    }
+
+    // Fallback to regular audio element
     if (audioRef.current && urls && urls.length > 0) {
       audioRef.current.src = urls[index];
       audioRef.current.play().catch((e) => {
@@ -783,8 +817,8 @@ function App() {
       const urls = audioCache.current[cacheKey];
       setAudioUrls(urls);
       setIsAudioLoading(false);
-      // Play directly without waiting for React re-render
-      playAudioDirect(urls, 0);
+      // Play directly using preloaded elements when available
+      playAudioDirect(urls, 0, shlokaId, type);
       if (currentIndex !== -1) {
         // Defer prefetch so it doesn't block current playback
         setTimeout(() => prefetchNextAudio(currentIndex, type), 0);
@@ -806,8 +840,8 @@ function App() {
         audioCache.current[cacheKey] = data.urls;
         setAudioUrls(data.urls);
         setIsAudioLoading(false);
-        // Play directly without waiting for React re-render or prefetch completion
-        playAudioDirect(data.urls, 0);
+        // Play directly using preloaded elements when available
+        playAudioDirect(data.urls, 0, shlokaId, type);
         if (currentIndex !== -1) {
           // Defer prefetch so it doesn't compete with immediate playback
           setTimeout(() => prefetchNextAudio(currentIndex, type), 0);
@@ -903,8 +937,23 @@ function App() {
         const nextShloka = shlokas[currentIndex + 1];
         const element = document.getElementById(`shloka-card-${nextShloka.id}`);
         element?.scrollIntoView({ behavior: "smooth", block: "center" });
-        audioPrefetchInFlight.current.clear();
-        handlePlayAudio(nextShloka.id, currentAudioType);
+
+        // Seamless transition: use cached audio if available, otherwise fetch
+        const nextCacheKey = `${nextShloka.id}_${currentAudioType}`;
+        if (audioCache.current[nextCacheKey]) {
+          // Instant seamless transition using cached audio
+          const nextUrls = audioCache.current[nextCacheKey];
+          setPlayingAudioId(nextShloka.id);
+          setAudioUrls(nextUrls);
+          setCurrentAudioIndex(0);
+          setIsAudioLoading(false);
+          // Play immediately using preloaded elements
+          playAudioDirect(nextUrls, 0, nextShloka.id, currentAudioType);
+        } else {
+          // Fallback to normal playback if not cached
+          audioPrefetchInFlight.current.clear();
+          handlePlayAudio(nextShloka.id, currentAudioType);
+        }
       } else {
         setPlayingAudioId(null);
         setCurrentAudioIndex(0);
