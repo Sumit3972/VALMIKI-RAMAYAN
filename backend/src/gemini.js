@@ -193,11 +193,9 @@ async function generateTranslationPrep(
 
         const systemPrompt = `You are an expert Sanskrit scholar and commentator specializing in the Valmiki Ramayana.
 
-Honorifics:
-- Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
-- Refer to "Sita" as "Mata Sita" or "Devi Sita".
-- Refer to "Hanuman" as "Shree Hanuman".
-- Refer to "Lakshmana" as "Shree Lakshman".
+Honorifics and Names:
+- Infer character names strictly from the shloka and its immediate context. Do NOT hardcode or inject names (like 'Shree Ram', 'Mata Sita', etc.) if they are not explicitly mentioned or clearly implied by the verse.
+- When revered characters ARE mentioned, apply appropriate honorifics: "Shree Ram", "Mata Sita", "Shree Lakshman", "Shree Hanuman".
 - Antagonists (e.g. Ravana) without honorifics.
 - Sages: use "Maharishi", "Sage", "Rishi".
 - **Kanda and Sarga context rules**: In the translation and context, only mention characters and events that are appropriate for the current Kanda's narrative and timeline. For example, Shree Hanuman does NOT appear in Ayodhya Kanda. Never mention Hanuman or other inactive characters in the translations, context, or insights for Ayodhya Kanda shlokas.
@@ -473,11 +471,9 @@ Rules:
 1. Don't explain too much. Only translate what the shloka says directly and faithfully.
 2. Do NOT add any extra context, commentary, explanation, philosophical insight, spiritual interpretation, or background details.
 3. Keep the translation simple, natural, concise, and reverent.
-4. Honorifics:
-   - Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
-   - Refer to "Sita" as "Mata Sita" or "Devi Sita".
-   - Refer to "Hanuman" as "Shree Hanuman".
-   - Refer to "Lakshmana" as "Shree Lakshman".
+4. Honorifics and Names:
+   - Infer character names strictly from the shloka and its immediate context. Do NOT hardcode or inject names (like 'Shree Ram', 'Mata Sita', etc.) if they are not explicitly mentioned or clearly implied by the verse.
+   - When revered characters ARE mentioned, apply appropriate honorifics: "Shree Ram", "Mata Sita", "Shree Lakshman", "Shree Hanuman".
    - Antagonists (e.g. Ravana) without honorifics.
    - Sages: use "Maharishi", "Sage", "Rishi".
 5. Kanda and Sarga context rules: In the translation, only mention characters and events that are appropriate for the current Kanda's narrative and timeline. Do not mention inactive or future characters (e.g., Shree Hanuman does not appear in Ayodhya Kanda).
@@ -609,11 +605,9 @@ Identify the primary emotional tone of the shloka/scene context. Choose exactly 
 1. Don't explain too much. Only translate what the shloka says directly and faithfully.
 2. Do NOT add any extra context, commentary, explanation, philosophical insight, spiritual interpretation, or background details.
 3. Keep the translation simple, natural, concise, and reverent.
-4. Honorifics:
-   - Always refer to "Rama" as "Shree Ram" or "Lord Shree Ram".
-   - Refer to "Sita" as "Mata Sita" or "Devi Sita".
-   - Refer to "Hanuman" as "Shree Hanuman".
-   - Refer to "Lakshmana" as "Shree Lakshman".
+4. Honorifics and Names:
+   - Infer character names strictly from the shloka and its immediate context. Do NOT hardcode or inject names (like 'Shree Ram', 'Mata Sita', etc.) if they are not explicitly mentioned or clearly implied by the verse.
+   - When revered characters ARE mentioned, apply appropriate honorifics: "Shree Ram", "Mata Sita", "Shree Lakshman", "Shree Hanuman".
    - Antagonists (e.g. Ravana) without honorifics.
    - Sages: use "Maharishi", "Sage", "Rishi".
 5. Return only the direct translation text.
