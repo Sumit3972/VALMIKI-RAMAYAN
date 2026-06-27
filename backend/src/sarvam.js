@@ -143,16 +143,30 @@ function chunkTextSafely(text, limit = 2000) {
  * @param {string} text - The text to synthesize.
  * @param {string} languageCode - e.g., 'sa-IN', 'hi-IN', 'en-IN'
  * @param {string} speaker - The speaker name/ID to use
+ * @param {string} emotion - The emotional tone to use for voice rendering
  * @returns {Promise<Buffer>} The audio buffer.
  */
-async function generateTTSChunk(text, languageCode, speaker = 'shubh') {
+async function generateTTSChunk(text, languageCode, speaker = 'shubh', emotion = 'neutral') {
+  const emotionMap = {
+    anger: { pace: 1.25, temperature: 0.85 },
+    sorrow: { pace: 0.90, temperature: 0.75 },
+    fear: { pace: 1.30, temperature: 0.90 },
+    reverence: { pace: 1.05, temperature: 0.35 },
+    joy: { pace: 1.20, temperature: 0.80 },
+    courage: { pace: 1.15, temperature: 0.60 },
+    neutral: { pace: 1.15, temperature: 0.60 }
+  };
+
+  const config = emotionMap[emotion] || emotionMap.neutral;
+
   return limiter.schedule(async () => {
     return callWithRetry(async (apiKey) => {
       const payload = {
         text: text,
         target_language_code: languageCode,
         speaker: speaker,
-        pace: 1.15,
+        pace: config.pace,
+        temperature: config.temperature,
         model: 'bulbul:v3',
         speech_sample_rate: 48000,
         output_audio_codec: 'mp3'

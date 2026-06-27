@@ -21,18 +21,23 @@ function isRateLimited(error) {
 }
 
 /**
- * Detects if an error is due to model overload/unavailability (503).
+ * Detects if an error is due to model overload/unavailability (503)
+ * or quota exhaustion (403 insufficient_user_quota).
  */
 function isModelUnavailable(error) {
   const status = error.status || error.response?.status;
   const data = error.response?.data;
   
   const is503 = status === 503;
+  const is403Quota = status === 403 && (
+    data?.error?.code === 'insufficient_user_quota' ||
+    data?.error?.message?.toLowerCase().includes('quota')
+  );
   const hasUnavailableMessage =
     data?.error?.message?.includes("experiencing high demand") ||
     data?.error?.status === "UNAVAILABLE";
 
-  return is503 || hasUnavailableMessage;
+  return is503 || is403Quota || hasUnavailableMessage;
 }
 
 /**
@@ -179,7 +184,7 @@ async function generateTranslationPrep(
   context = {},
 ) {
   return limiter.schedule(async () => {
-    const models = ["gpt-5.5"];
+    const models = ["gpt-5.5", "claude-opus-4-6", "glm-5.2"];
     let lastError = null;
 
     for (const model of models) {
@@ -315,7 +320,7 @@ function applyHonorifics(text, lang) {
  */
 async function classifySpeaker(sanskritText, englishTranslation, context = {}, surroundingShlokas = []) {
   return limiter.schedule(async () => {
-    const models = ["gpt-5.5"];
+    const models = ["gpt-5.5", "claude-opus-4-6", "glm-5.2"];
     let lastError = null;
 
     for (const model of models) {
@@ -454,7 +459,7 @@ async function generateAudioTranslationPrep(
   context = {},
 ) {
   return limiter.schedule(async () => {
-    const models = ["gpt-5.5"];
+    const models = ["gpt-5.5", "claude-opus-4-6", "glm-5.2"];
     let lastError = null;
 
     for (const model of models) {
@@ -562,7 +567,7 @@ async function generateAudioDetailsPrep(
   surroundingShlokas = [],
 ) {
   return limiter.schedule(async () => {
-    const models = ["gpt-5.5"];
+    const models = ["gpt-5.5", "claude-opus-4-6", "glm-5.2"];
     let lastError = null;
 
     for (const model of models) {
@@ -570,9 +575,10 @@ async function generateAudioDetailsPrep(
         console.log(`[LLM] Attempting combined audio details using model: ${model}`);
 
         const systemPrompt = `You are an expert Sanskrit scholar specializing in the Valmiki Ramayana.
-Analyze the given Sanskrit shloka and its reference translation, and return two pieces of information:
+Analyze the given Sanskrit shloka and its reference translation, and return three pieces of information:
 1. The character speaker classification.
-2. The direct, concise translation of the shloka in the target language.
+2. The primary emotional tone classification.
+3. The direct, concise translation of the shloka in the target language.
 
 Follow these strict rules for each:
 
@@ -589,7 +595,17 @@ Identify the primary character speaking these words.
    - valmiki:वाल्मीकि:male
    - lakshmana:लक्ष्मण जी:male
 
---- PART 2: CONCISE TRANSLATION ---
+--- PART 2: EMOTION CLASSIFICATION ---
+Identify the primary emotional tone of the shloka/scene context. Choose exactly one of the following lowercase slugs:
+- 'anger' (for angry, furious, intense speech)
+- 'sorrow' (for sad, grieving, weeping, mournful speech)
+- 'fear' (for terrified, panicked, anxious, trembling speech)
+- 'joy' (for happy, delighted, celebratory, eager speech)
+- 'reverence' (for calm, peaceful, prayerful, respectful, meditative speech)
+- 'courage' (for brave, heroic, confident, firm, proud speech)
+- 'neutral' (for narration, standard scene descriptions, or general conversation without strong emotion)
+
+--- PART 3: CONCISE TRANSLATION ---
 1. Don't explain too much. Only translate what the shloka says directly and faithfully.
 2. Do NOT add any extra context, commentary, explanation, philosophical insight, spiritual interpretation, or background details.
 3. Keep the translation simple, natural, concise, and reverent.
@@ -601,11 +617,14 @@ Identify the primary character speaking these words.
    - Antagonists (e.g. Ravana) without honorifics.
    - Sages: use "Maharishi", "Sage", "Rishi".
 5. Return only the direct translation text.
+6. **Expressive Punctuation**: Format the translation using punctuation (such as exclamation marks '!', ellipses '...', question marks '?') matching the classified emotion to guide the Text-to-Speech (TTS) model's voice intonation.
 
 --- OUTPUT STRUCTURE ---
 You MUST format your output exactly as follows:
 |||SPEAKER|||
 [english_snake_case:hindi_name:gender]
+|||EMOTION|||
+[emotion_slug]
 |||TRANSLATION|||
 [Concise translation text]
 
@@ -669,15 +688,22 @@ ${
         );
 
         // Parse outputs
-        const speakerMatch = content.match(/\|\|\|SPEAKER\|\|\|([\s\S]*?)(?=\|\|\|TRANSLATION\|\|\||$)/);
+        const speakerMatch = content.match(/\|\|\|SPEAKER\|\|\|([\s\S]*?)(?=\|\|\|EMOTION\|\|\||\|\|\|TRANSLATION\|\|\||$)/);
+        const emotionMatch = content.match(/\|\|\|EMOTION\|\|\|([\s\S]*?)(?=\|\|\|TRANSLATION\|\|\||$)/);
         const translationMatch = content.match(/\|\|\|TRANSLATION\|\|\|([\s\S]*)$/);
 
         let speaker = speakerMatch ? speakerMatch[1].trim() : "valmiki:वाल्मीकि:male";
+        let emotion = emotionMatch ? emotionMatch[1].trim().toLowerCase() : "neutral";
         let translation = translationMatch ? translationMatch[1].trim() : "";
 
         // Fallback checks
         if (!speaker.includes(":")) {
           speaker = "valmiki:वाल्मीकि:male";
+        }
+
+        const validEmotions = ["neutral", "anger", "sorrow", "fear", "joy", "reverence", "courage"];
+        if (!validEmotions.includes(emotion)) {
+          emotion = "neutral";
         }
 
         // Clean up markdown artifacts in translation
@@ -694,7 +720,7 @@ ${
         // Enforce honorifics
         translation = applyHonorifics(translation, targetLanguage);
 
-        return { speaker, translation };
+        return { speaker, translation, emotion };
       } catch (error) {
         if (isModelUnavailable(error)) {
           console.warn(

@@ -242,15 +242,16 @@ async function getOrGenerateAudioDetails(shloka, lang, surroundingShlokas = []) 
   
   let speaker = shloka.speaker_character;
   let translation = shloka[translationColumn];
+  let emotion = shloka.emotion;
   
   // If we already have the speaker (usually true after first classification) AND the translation, return cached
   // Note: if the audio type is 'sanskrit', we only need speaker, so we check if speaker is already cached.
   if (lang === "sanskrit" && speaker) {
-    return { speaker, translation: shloka.sanskrit };
+    return { speaker, translation: shloka.sanskrit, emotion: emotion || "neutral" };
   }
   
   if (speaker && translation) {
-    return { speaker, translation };
+    return { speaker, translation, emotion: emotion || "neutral" };
   }
   
   // Call combined LLM function to get both details in one call
@@ -262,7 +263,7 @@ async function getOrGenerateAudioDetails(shloka, lang, surroundingShlokas = []) 
     surroundingShlokas
   );
   
-  const { speaker: newSpeaker, translation: newTranslation } = result;
+  const { speaker: newSpeaker, translation: newTranslation, emotion: newEmotion } = result;
   
   const updates = [];
   const params = [];
@@ -281,6 +282,13 @@ async function getOrGenerateAudioDetails(shloka, lang, surroundingShlokas = []) 
     updates.push(`${translationColumn} = $${paramIdx++}`);
     params.push(newTranslation);
   }
+
+  if (!emotion && newEmotion) {
+    shloka.emotion = newEmotion;
+    emotion = newEmotion;
+    updates.push(`emotion = $${paramIdx++}`);
+    params.push(newEmotion);
+  }
   
   if (updates.length > 0) {
     params.push(shloka.id);
@@ -291,10 +299,10 @@ async function getOrGenerateAudioDetails(shloka, lang, surroundingShlokas = []) 
   }
   
   if (lang === "sanskrit") {
-    return { speaker, translation: shloka.sanskrit };
+    return { speaker, translation: shloka.sanskrit, emotion: emotion || "neutral" };
   }
   
-  return { speaker, translation };
+  return { speaker, translation, emotion: emotion || "neutral" };
 }
 
 // Helper to safely parse JSON arrays from the DB text columns
@@ -562,7 +570,7 @@ app.post("/batch/audio", async (c) => {
     const audioUrls = [];
 
     for (let i = 0; i < chunks.length; i++) {
-      const audioBuffer = await generateTTSChunk(chunks[i], langCode, voice);
+      const audioBuffer = await generateTTSChunk(chunks[i], langCode, voice, details.emotion);
       const fileName = `k${shloka.kanda}_s${shloka.sarga}_sh${shloka.shloka_number}_${type}_pt${i + 1}_${Date.now()}.mp3`;
       const publicUrl = await uploadAudioToR2(audioBuffer, fileName);
       audioUrls.push(publicUrl);
@@ -686,7 +694,7 @@ app.post("/audio", async (c) => {
       // 5. Generate and Upload Chunks
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i];
-        const audioBuffer = await generateTTSChunk(chunkText, langCode, voice);
+        const audioBuffer = await generateTTSChunk(chunkText, langCode, voice, details.emotion);
 
         const fileName = `k${shloka.kanda}_s${shloka.sarga}_sh${shloka.shloka_number}_${type}_pt${i + 1}_${Date.now()}.mp3`;
         const publicUrl = await uploadAudioToR2(audioBuffer, fileName);
